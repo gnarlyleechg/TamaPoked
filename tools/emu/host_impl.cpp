@@ -133,6 +133,7 @@ bool pwrShortPressed() { return false; }
 // --- audio (silent) ---
 void audioBegin() {}
 void sfxPlay(uint8_t) {}
+void audioHold(bool) {}
 // no radio here; the protocol itself is exercised by tests/link_test.cpp
 struct Link;
 // No radio here at all, which is why lossy_test drives Link directly instead

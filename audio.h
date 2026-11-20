@@ -47,5 +47,8 @@ uint8_t audioVolume();
 
 void audioBegin();          // init ES8311 + I2S + amplificador + tarea de audio
 void sfxPlay(uint8_t id);   // encola un efecto (no bloquea el loop)
+// Keep the speaker amplifier powered while true (a minigame is open), so quick
+// taps are heard at once; false returns it to the normal power-saving behaviour.
+void audioHold(bool on);
 void audioSetEnabled(bool on);
 bool audioEnabled();

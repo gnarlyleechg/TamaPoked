@@ -21,6 +21,7 @@
 static I2SClass i2s;
 static bool gReady = false;
 static bool gOn = true;
+static volatile bool gHold = false;
 static QueueHandle_t gQ = nullptr;
 
 // ---- I2C del códec ----
@@ -212,6 +213,7 @@ static void audioTask(void *) {
 
   for (;;) {
     uint8_t m = gMusic;
+    if (gHold && gOn && gReady && !ampOn) { digitalWrite(PA, HIGH); delay(30); ampOn = true; lastSfxAt = millis(); }
     bool wantAudio = (m != MUS_NONE) || gSyn.busy();
     if (!gOn || !gReady) { gSyn.allOff(); m = MUS_NONE; wantAudio = false; }
 
@@ -249,7 +251,7 @@ static void audioTask(void *) {
     }
 
     if (m == MUS_NONE) {
-      if (ampOn && !gSyn.busy() && millis() - lastSfxAt > 2500) { digitalWrite(PA, LOW); ampOn = false; }
+      if (ampOn && !gSyn.busy() && !gHold && millis() - lastSfxAt > 2500) { digitalWrite(PA, LOW); ampOn = false; }
       playing = MUS_NONE; mi1 = mi2 = 0; at1 = at2 = clock = 0;
       continue;
     }
@@ -331,6 +333,8 @@ void sfxPlay(uint8_t id) {
   if (isLightSfx(id) && uxQueueMessagesWaiting(gQ) >= 2) return;
   xQueueSend(gQ, &id, 0);  // descarta si la cola esta llena
 }
+
+void audioHold(bool on) { gHold = on; }
 
 void audioSetEnabled(bool on) {
   gOn = on;

@@ -833,6 +833,8 @@ void loop() {
     lastBoot = down;
   }
 
+  audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
+
   updateBrightness(now);
 
   // vuelca el autoguardado periodico SOLO con la pantalla atenuada/apagada o
