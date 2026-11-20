@@ -2867,15 +2867,32 @@ void renderClock() {
   gfx->setCursor(276, 256);
   gfx->print(T(S_MIN));
 
-  // interruptor de sonido (izquierda de la fila de idioma)
-  bool snd = audioEnabled();
-  const char *sl = snd ? T(S_SND_ON) : T(S_SND_OFF);
-  gfx->fillRoundRect(34, LANG_PILL_Y, 96, LANG_PILL_H, 8, snd ? UI_BAR_OK : UI_WHITE);
-  gfx->drawRoundRect(34, LANG_PILL_Y, 96, LANG_PILL_H, 8, UI_INK);
-  gfx->setTextColor(snd ? UI_BG_DAY : UI_INK);
-  gfx->setTextSize(2);
-  gfx->setCursor(34 + (96 - (int)strlen(sl) * 12) / 2, LANG_PILL_Y + 8);
-  gfx->print(sl);
+  // sound switch: a speaker with waves when on, the same speaker crossed out when off
+  {
+    bool snd = audioEnabled();
+    int px = 34, py = LANG_PILL_Y, pw = 96, ph = LANG_PILL_H;
+    gfx->fillRoundRect(px, py, pw, ph, 8, snd ? UI_BAR_OK : UI_WHITE);
+    gfx->drawRoundRect(px, py, pw, ph, 8, UI_INK);
+    int cx0 = px + 30, cy0 = py + ph / 2;       // the speaker body
+    gfx->fillRect(cx0, cy0 - 4, 6, 8, UI_INK);
+    gfx->fillTriangle(cx0 + 6, cy0 - 4, cx0 + 6, cy0 + 4, cx0 + 15, cy0 + 11, UI_INK);
+    gfx->fillTriangle(cx0 + 6, cy0 - 4, cx0 + 15, cy0 + 11, cx0 + 15, cy0 - 11, UI_INK);
+    if (snd) {
+      for (int r = 8; r <= 16; r += 8)           // two sound waves
+        for (int a = -45; a <= 45; a += 9) {
+          float t0 = a * 0.0174533f, t1 = (a + 9) * 0.0174533f;
+          int x0 = cx0 + 15 + (int)(r * cosf(t0)), y0 = cy0 + (int)(r * sinf(t0));
+          int x1 = cx0 + 15 + (int)(r * cosf(t1)), y1 = cy0 + (int)(r * sinf(t1));
+          if (a < 45) { gfx->drawLine(x0, y0, x1, y1, UI_INK); gfx->drawLine(x0 + 1, y0, x1 + 1, y1, UI_INK); }
+        }
+    } else {                                     // a red X: clearly muted
+      int xx = cx0 + 24;
+      for (int d = 0; d < 2; d++) {
+        gfx->drawLine(xx, cy0 - 7 + d, xx + 14, cy0 + 7 + d, UI_BAR_BAD);
+        gfx->drawLine(xx, cy0 + 7 + d, xx + 14, cy0 - 7 + d, UI_BAR_BAD);
+      }
+    }
+  }
 
   // volume: a level, not a toggle. The sound switch beside it is still the
   // master -- this is how loud it is when it is on, and 0 is silent.
@@ -2903,15 +2920,16 @@ void renderClock() {
     if (v) gfx->fillRoundRect(210, LANG_PILL_Y + 18, 56 * v / 10, 8, 3, UI_BAR_OK);
   }
 
-  // selector de idioma: una pildora que cicla los 6 idiomas al tocar
-  gfx->fillRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_WHITE);
-  gfx->drawRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_INK);
-  char lp[10];
-  snprintf(lp, sizeof(lp), "BRT %u", gBrightLvl);
-  gfx->setTextColor(UI_INK);
-  gfx->setTextSize(2);
-  gfx->setCursor(LANG_PILL_X + (LANG_PILL_W - (int)strlen(lp) * 12) / 2, LANG_PILL_Y + 8);
-  gfx->print(lp);
+  // brightness: five bars like a phone signal; more green bars = brighter
+  {
+    gfx->fillRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_WHITE);
+    gfx->drawRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_INK);
+    int base = LANG_PILL_Y + LANG_PILL_H - 4;
+    for (int i = 0; i < 5; i++) {
+      int h = 6 + i * 4, bx = LANG_PILL_X + 14 + i * 14;
+      gfx->fillRect(bx, base - h, 10, h, i < gBrightLvl ? UI_BAR_OK : UI_TRACK);
+    }
+  }
 
   gfx->fillRoundRect(133, 340, 200, 48, 14, UI_BAR_OK);
   gfx->setTextColor(UI_BG_DAY);

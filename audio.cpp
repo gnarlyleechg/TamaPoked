@@ -208,6 +208,7 @@ static void audioTask(void *) {
   uint32_t at1 = 0, at2 = 0, clock = 0;
   uint8_t playing = MUS_NONE;
   bool ampOn = false;
+  uint32_t lastSfxAt = 0;
 
   for (;;) {
     uint8_t m = gMusic;
@@ -219,7 +220,11 @@ static void audioTask(void *) {
     // simpler and the right priority.
     if (xQueueReceive(gQ, &id, wantAudio ? 0 : pdMS_TO_TICKS(40)) == pdTRUE) {
       if (gOn && gReady && id < SFX_COUNT) {
-        if (!ampOn) { digitalWrite(PA, HIGH); delay(6); ampOn = true; }
+        // The amplifier needs a moment to wake. Waking it per sound swallowed the
+        // first ~30 ms, which is the whole of a ball or punch cue, so it now
+        // stays on for a couple of seconds after the last sound (see below).
+        if (!ampOn) { digitalWrite(PA, HIGH); delay(30); ampOn = true; }
+        lastSfxAt = millis();
         const SfxDef &d = SFX[id];
         for (uint8_t i = 0; i < d.len; i++) {
           uint16_t raw = d.n[i].f;
@@ -238,12 +243,13 @@ static void audioTask(void *) {
           // game sound NOW instead of queueing up behind each other
           if (isLightSfx(id) && uxQueueMessagesWaiting(gQ)) break;
         }
+        lastSfxAt = millis();
       }
       continue;
     }
 
     if (m == MUS_NONE) {
-      if (ampOn && !gSyn.busy()) { digitalWrite(PA, LOW); ampOn = false; }
+      if (ampOn && !gSyn.busy() && millis() - lastSfxAt > 2500) { digitalWrite(PA, LOW); ampOn = false; }
       playing = MUS_NONE; mi1 = mi2 = 0; at1 = at2 = clock = 0;
       continue;
     }
