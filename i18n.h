@@ -131,6 +131,9 @@ enum StrId : uint8_t {
   S_BOX_TAKE,       // box detail sheet: move this creature into the party
   S_RETIRE_GONE,    // retire confirm: an early retire is not banked either
   S_BTL_RUN_Q,      // battle: "Run away?" before leaving a fight
+  S_SHOP,           // menu row and shop title
+  S_COINS_FMT,      // "%u coins"
+  S_STEPS_FMT,      // "%u steps today"
   STR_COUNT
 };
 

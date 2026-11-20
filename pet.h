@@ -121,6 +121,16 @@ public:
   // racha de cuidado diario (del jugador: persiste entre crianzas)
   uint16_t streak = 0, bestStreak = 0;
   uint32_t lastCareDay = 0;
+  // Kids build: coins and steps. Player-wide like the streak, so no ending
+  // clears them. Walking with the board earns coins; the shop spends them.
+  uint32_t coins = 0;
+  uint16_t stepsToday = 0;
+  uint32_t stepsDay = 0;      // the day number stepsToday belongs to
+  uint16_t stepRem = 0;       // steps toward the next coin
+  void addSteps(uint16_t n, uint32_t day);
+  void earnCoins(uint32_t n);
+  bool spendCoins(uint32_t n);
+  bool giveGift(uint8_t kind);  // shop gifts; false if it could not apply
   // vinculo (del bicho: sube lento con cuidado, se resetea al nacer otro)
   uint8_t bond = 0;
   char nick[12] = "";    // apodo (vacio = nombre de especie)

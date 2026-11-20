@@ -135,3 +135,7 @@ the column splitter used for the SVG sheets cannot cut it) and packs them at
 **If this project is ever published in a form that would trouble either artist,
 the honest fix is the one already recommended for the player avatars: ship
 `tools/gen_badges.py` and let each user fetch the art themselves.**
+
+## Step counting (kids build)
+
+`steps.h` and the QMI8658 FIFO reading in `imustep.cpp` are ported from the Life sim fork of TamaPoke (MIT, (c) 2026 Quique Tortosa and contributors), whose step detector itself follows an earlier MIT implementation by ShadowEnemyx.

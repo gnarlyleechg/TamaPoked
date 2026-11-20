@@ -3,7 +3,7 @@
 [![Flash in browser](https://img.shields.io/badge/flash-in%20browser-FF6B00?logo=googlechrome&logoColor=white)](https://dylanpdao.github.io/TamaPoke/web/)
 [![MakerWorld](https://img.shields.io/badge/MakerWorld-3D%20case-00AE42?logo=bambulab&logoColor=white)](https://makerworld.com/es/models/2937822-tamapoke-a-pokemon-pokeball-tamagotchi)
 ![Board](https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white)
-![Firmware](https://img.shields.io/badge/firmware-v3.11-8A2BE2)
+![Firmware](https://img.shields.io/badge/firmware-v3.12-8A2BE2)
 ![Code](https://img.shields.io/badge/code-MIT-blue)
 ![Languages](https://img.shields.io/badge/languages-6-FFCB05)
 [![Stars](https://img.shields.io/github/stars/DylanPDao/TamaPoke?style=flat&logo=github&color=yellow)](https://github.com/DylanPDao/TamaPoke/stargazers)
@@ -329,6 +329,21 @@ creature that hatches next, is spent by hatching it, and does **not** compound:
 three early retires in a row still cost one day. The creature's card says
 "evolves a day later" while it carries the debt, and the confirm dialog says the
 price before you accept it.
+
+### Coins and the shop (kids build)
+
+| Thing | Value |
+|---|---|
+| Earning by walking | 10 steps = 1 coin, counted from the board's accelerometer |
+| Daily cap | the first 1500 steps of a day earn coins (150 max); steps keep counting after |
+| Gym win | +20 coins (easy), +40 (hard) |
+| Opening the shop | tap the name strip at the top, then SHOP |
+| BIG MEAL / BUBBLE BATH | 5 coins, always available (fill food / clean and clear the mess) |
+| TOY | 8 coins, unlocks at 3 Pokemon in the Pokedex (fills joy) |
+| ENERGY DRINK | 8 coins, unlocks at 6 (fills energy) |
+| VITAMIN | 30 coins, unlocks at 12 (+3 training in a random stat with room; refused and not charged if none) |
+
+Coins and steps are the player's, like the streak: no ending clears them, and they are in the SD backup.
 
 ### Choosing your egg's region
 

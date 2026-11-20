@@ -29,6 +29,7 @@
 #include "party.h"
 #include "save.h"
 #include "backupsd.h"
+#include "imustep.h"
 #include "pet.h"
 #include "sdmon.h"
 #include "rtcbat.h"
@@ -37,7 +38,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.11"
+#define FW_VERSION "3.12"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -114,12 +115,12 @@ bool menuOpen = false;
 #define MENU_Y 75
 #define MENU_W 320
 #define MENU_H 316
-#define MENU_ROW_H 52
+#define MENU_ROW_H 44
 #define MENU_ROW_GAP 6
 // 5 rows: STATS / POKEDEX / SETTINGS / RETIRE / CLOSE. At MENU_Y 75 the panel
 // spans 75..391 and the round display gives a half-width of 171 there against
 // the 160 a row needs, so the corners stay on glass.
-#define MENU_ROWS 5
+#define MENU_ROWS 6
 #define MENU_ROW_Y(i) (MENU_Y + 16 + (i) * (MENU_ROW_H + MENU_ROW_GAP))
 
 // Party screen. partyPick != 0 means the newcomer needs a slot: the player
@@ -150,6 +151,8 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+void renderShop();
+void shopTap(int16_t x, int16_t y);
 void openClock();            // defined further down; loop() opens it from the BOOT button
 int clockH = 12, clockM = 0;  // hora en edicion
 
@@ -186,6 +189,9 @@ bool sackNewHi = false;
 // DEF has no minigame -- it rises on its own from good wellbeing -- so its row
 // is informational and does not respond to a tap.
 bool trainOpen = false;
+bool shopOpen = false;        // the coin shop (menu row)
+char shopMsg[28] = "";
+uint32_t shopMsgUntil = 0;
 
 // move picker, opened from the MOVES card page. Most learnsets are level 0, so
 // a level-up "you learned a move" prompt would almost never fire -- the moveset
@@ -213,7 +219,7 @@ enum : uint8_t {
   SCR_STARTER = 0, SCR_REGION, SCR_GALLERY, SCR_DEXPICK, SCR_MOVEPICK, SCR_BOX,
   SCR_PARTY, SCR_KEYBOARD, SCR_CARD, SCR_PLAYER, SCR_CLOCK, SCR_GYM, SCR_GYMPICK,
   SCR_LAN, SCR_PICK, SCR_BATTLE, SCR_WIN, SCR_LEARN, SCR_TRAIN, SCR_MENU,
-  SCR_GAME, SCR_MAIN, SCR_COUNT
+  SCR_SHOP, SCR_GAME, SCR_MAIN, SCR_COUNT
 };
 extern const char *const SCREEN_NAME[SCR_COUNT];   // const is internal linkage in C++
 
@@ -237,7 +243,7 @@ const char *const SCREEN_NAME[SCR_COUNT] = {
   "starter", "region", "gallery", "dexpick", "movepick", "box",
   "party", "keyboard", "card", "player", "clock", "gym", "gympick",
   "lan", "pick", "battle", "win", "learn", "train", "menu",
-  "minigame", "main"
+  "shop", "minigame", "main"
 };
 
 // Badge art for a region, or nullptr when that region has none yet.
@@ -700,6 +706,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(TP_INT), touchIsr, FALLING);
 
   party.begin();
+  imuStepsBegin();   // step counter for the coin economy
   pet.begin();
   sdBegin();
   // Kids build: a flash with "erase" empties the save. If the SD has a valid backup, bring it back
@@ -831,6 +838,21 @@ void loop() {
       }
     }
     lastBoot = down;
+  }
+
+  // steps -> coins: the accelerometer FIFO is drained every pass (it rate-limits
+  // itself) and the counted steps are handed to the pet every 5 s
+  imuStepsPump(now);
+  {
+    static uint32_t lastStepRead = 0;
+    if (now - lastStepRead > 5000) {
+      lastStepRead = now;
+      uint16_t st = imuStepsTake();
+      if (st) {
+        uint32_t e = rtcEpoch();
+        pet.addSteps(st, e ? e / 86400 : pet.stepsDay);
+      }
+    }
   }
 
   audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
@@ -1247,6 +1269,7 @@ void onSwipeV(int dir) {
   }
   if (playerOpen) { playerOpen = false; return; }
   if (trainOpen) { trainOpen = false; return; }
+  if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) { movePickOpen = false; return; }
   if (boxOpen) { boxOpen = false; boxSel = 0; return; }   // vertical backs out
   if (partyOpen) {
@@ -1616,6 +1639,7 @@ void onSwipe(int dir) {
     return;
   }
   if (trainOpen) { trainOpen = false; return; }
+  if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) {   // the picker is paged; without this its later pages
     uint8_t all[64];    // were simply unreachable
     uint8_t n = learnableList(all, sizeof(all));
@@ -1790,6 +1814,7 @@ void onTap(int16_t x, int16_t y) {
     }
     return;   // modal: nothing else on screen responds until it is answered
   }
+  if (shopOpen) { shopTap(x, y); return; }
   if (trainOpen) {
     bool inPanel = (x >= TRAIN_X && x <= TRAIN_X + TRAIN_W &&
                     y >= TRAIN_Y && y <= TRAIN_Y + TRAIN_H);
@@ -1828,7 +1853,8 @@ void onTap(int16_t x, int16_t y) {
         if (!pet.canRetireNow()) { sfxPlay(SFX_DENY); return; }
         choiceKind = 3; choiceUntil = millis() + 12000;
       }
-      return;                                     // i == 4 is CLOSE: just shut
+      else if (i == 4) { shopOpen = true; shopMsg[0] = 0; }
+      return;                                     // i == 5 is CLOSE: just shut
     }
     return;
   }
@@ -2175,6 +2201,7 @@ uint8_t uiCurrentScreen() {
   if (pet.hasLearnOffer()) return SCR_LEARN;
   if (gameOpen || sackOpen || spdOpen) return SCR_GAME;
   if (trainOpen) return SCR_TRAIN;
+  if (shopOpen) return SCR_SHOP;
   if (menuOpen) return SCR_MENU;
   return SCR_MAIN;
 }
@@ -2256,6 +2283,10 @@ void render() {
   }
   if (trainOpen) {
     renderTrain();
+    return;
+  }
+  if (shopOpen) {
+    renderShop();
     return;
   }
   if (kbOpen) {
@@ -3700,6 +3731,7 @@ static void btlResolve(uint8_t yourMove) {
       uint8_t amt = (btlHard ? 6 + random(5) : 3 + random(3)) + btlTrainer / 3;
       btlTrainGain = pet.rewardTraining(amt, btlTrainWhich);
     }
+    if (btlWon && btlTrainer >= 0) pet.earnCoins(btlHard ? 40 : 20);   // gym win coins
     audioMusic(btlWon ? MUS_VICTORY : MUS_NONE);
     if (btlWon) sfxPlay(SFX_VICTORY);
     // Tell the peer before anything else: if we stop here without sending, the
@@ -5255,6 +5287,7 @@ static void menuRowLabel(int i, char *out, size_t n) {
     case 1: snprintf(out, n, T(S_POKEDEX_FMT), pet.registeredCount(), DEX_COUNT); break;
     case 2: snprintf(out, n, "%s", T(S_SETTINGS)); break;
     case 3: snprintf(out, n, "%s", T(S_RETIRE)); break;
+    case 4: snprintf(out, n, "%s", T(S_SHOP)); break;
     default: snprintf(out, n, "%s", T(S_CLOSE)); break;
   }
 }
@@ -5333,6 +5366,101 @@ void renderTrain() {
   gfx->setCursor(CX - (int)strlen(T(S_TR_DEF_HINT)) * 3, TRAIN_Y + TRAIN_H - 22);
   gfx->print(T(S_TR_DEF_HINT));
   gfx->flush();   // without this the panel never updates and the screen freezes
+}
+
+// ---------- the coin shop (kids build) ----------
+// Coins come from walking (Pet::addSteps) and from gym wins. Gifts act on the
+// live creature at once; there is no inventory to lose. Items unlock as the
+// Pokedex fills, which is the reason to keep collecting.
+struct ShopItem { const char *name; const char *desc; uint16_t cost; uint16_t need; };
+static const ShopItem SHOP_ITEMS[] = {
+  { "BIG MEAL",     "fills his tummy",   5,  0 },
+  { "BUBBLE BATH",  "squeaky clean",     5,  0 },
+  { "TOY",          "a happy playtime",  8,  3 },
+  { "ENERGY DRINK", "wide awake",        8,  6 },
+  { "VITAMIN",      "trains a stat",    30, 12 },
+};
+#define SHOP_COUNT ((int)(sizeof(SHOP_ITEMS) / sizeof(SHOP_ITEMS[0])))
+#define SHOP_X 63
+#define SHOP_Y 70
+#define SHOP_W 340
+#define SHOP_H 330
+#define SHOP_ROW_H 46
+#define SHOP_ROW_Y(i) (SHOP_Y + 62 + (i) * (SHOP_ROW_H + 6))
+
+void renderShop() {
+  for (int y = 0; y < 466; y += 2)
+    gfx->drawFastHLine(0, y, 466, gNight ? 0x0000 : 0x2104);
+  gfx->fillRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_WHITE);
+  gfx->drawRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_INK);
+
+  char b[32];
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  snprintf(b, sizeof(b), "%s  -  %u", T(S_SHOP), (unsigned)pet.coins);
+  gfx->setCursor(CX - (int)strlen(b) * 6, SHOP_Y + 12);
+  gfx->print(b);
+  gfx->setTextSize(1);
+  gfx->setTextColor(UI_TRACK);
+  snprintf(b, sizeof(b), T(S_STEPS_FMT), (unsigned)pet.stepsToday);
+  gfx->setCursor(CX - (int)strlen(b) * 3, SHOP_Y + 36);
+  gfx->print(b);
+
+  uint16_t have = pet.registeredCount();
+  for (int i = 0; i < SHOP_COUNT; i++) {
+    const ShopItem &it = SHOP_ITEMS[i];
+    int y = SHOP_ROW_Y(i);
+    bool locked = have < it.need;
+    bool poor = !locked && pet.coins < it.cost;
+    gfx->fillRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, locked ? UI_TRACK : UI_BG_DAY);
+    gfx->drawRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, UI_INK);
+    gfx->setTextColor(locked ? 0x8410 : UI_INK);
+    gfx->setTextSize(2);
+    gfx->setCursor(SHOP_X + 30, y + 6);
+    gfx->print(it.name);
+    gfx->setTextSize(1);
+    if (locked) snprintf(b, sizeof(b), "collect %u Pokemon", (unsigned)it.need);
+    else snprintf(b, sizeof(b), "%s", it.desc);
+    gfx->setCursor(SHOP_X + 30, y + 30);
+    gfx->print(b);
+    if (!locked) {
+      gfx->setTextSize(2);
+      gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
+      snprintf(b, sizeof(b), "%u", (unsigned)it.cost);
+      gfx->setCursor(SHOP_X + SHOP_W - 30 - (int)strlen(b) * 12, y + 14);
+      gfx->print(b);
+    }
+  }
+  if (shopMsg[0] && millis() < shopMsgUntil) {
+    gfx->setTextSize(1);
+    gfx->setTextColor(UI_INK);
+    gfx->setCursor(CX - (int)strlen(shopMsg) * 3, SHOP_Y + SHOP_H - 20);
+    gfx->print(shopMsg);
+  }
+  gfx->flush();
+}
+
+static void shopSay(const char *m) {
+  snprintf(shopMsg, sizeof(shopMsg), "%s", m);
+  shopMsgUntil = millis() + 2500;
+}
+
+void shopTap(int16_t x, int16_t y) {
+  bool inPanel = (x >= SHOP_X && x <= SHOP_X + SHOP_W && y >= SHOP_Y && y <= SHOP_Y + SHOP_H);
+  if (!inPanel) { shopOpen = false; return; }       // tap outside = back
+  for (int i = 0; i < SHOP_COUNT; i++) {
+    int ry = SHOP_ROW_Y(i);
+    if (x < SHOP_X + 18 || x > SHOP_X + SHOP_W - 18 || y < ry || y > ry + SHOP_ROW_H) continue;
+    const ShopItem &it = SHOP_ITEMS[i];
+    if (pet.registeredCount() < it.need) { sfxPlay(SFX_DENY); shopSay("collect more Pokemon first"); return; }
+    if (pet.isEgg() || pet.ceremony) { sfxPlay(SFX_DENY); shopSay("needs a creature"); return; }
+    if (pet.coins < it.cost) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
+    if (!pet.giveGift((uint8_t)i)) { sfxPlay(SFX_DENY); shopSay("nothing to do right now"); return; }
+    pet.spendCoins(it.cost);
+    sfxPlay(i == 0 ? SFX_EAT : SFX_HEART);
+    shopSay("thank you!");
+    return;
+  }
 }
 
 // ---------- the box ----------

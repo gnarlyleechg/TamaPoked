@@ -315,6 +315,52 @@ void Pet::snapshotForParty() {
 // animacion para que el paron de la escritura a flash no se vea)
 void Pet::saveNow() { save(); }
 
+// ---- coins (kids build) ----
+#define STEPS_PER_COIN 10        // ten steps make a coin...
+#define STEP_COIN_CAP 1500       // ...for the first 1500 steps of a day (150 coins)
+
+void Pet::earnCoins(uint32_t n) {
+  if (!n) return;
+  coins = (coins + n > 99999) ? 99999 : coins + n;
+  pendingSave = true;
+}
+
+bool Pet::spendCoins(uint32_t n) {
+  if (coins < n) return false;
+  coins -= n;
+  save();
+  return true;
+}
+
+void Pet::addSteps(uint16_t n, uint32_t day) {
+  if (!n) return;
+  if (day != stepsDay) { stepsDay = day; stepsToday = 0; }
+  uint32_t before = stepsToday;
+  stepsToday = (stepsToday + n > 65000) ? 65000 : (uint16_t)(stepsToday + n);
+  uint32_t room = before >= STEP_COIN_CAP ? 0 : STEP_COIN_CAP - before;
+  uint32_t counted = n < room ? n : room;       // only these earn coins
+  uint32_t acc = stepRem + counted;
+  stepRem = (uint16_t)(acc % STEPS_PER_COIN);
+  earnCoins(acc / STEPS_PER_COIN);
+  pendingSave = true;
+}
+
+// Shop gifts: 0 meal, 1 soap, 2 toy, 3 drink, 4 vitamin. They act on the live
+// creature only; an egg or a companion has nothing to give them to.
+bool Pet::giveGift(uint8_t kind) {
+  if (isEgg() || ceremony != CER_NONE) return false;
+  switch (kind) {
+    case 0: fullness = 100; break;
+    case 1: hygiene = 100; poops = 0; break;
+    case 2: joy = 100; break;
+    case 3: energy = 100; break;
+    case 4: { uint8_t w; if (!rewardTraining(3, w)) return false; break; }
+    default: return false;
+  }
+  save();
+  return true;
+}
+
 void Pet::flushSave() {
   if (pendingSave) save();
 }
@@ -1295,6 +1341,10 @@ void Pet::save() {
   prefs.putUShort("strk", streak);
   prefs.putUShort("bstrk", bestStreak);
   prefs.putUInt("cday", lastCareDay);
+  prefs.putUInt("coin", coins);
+  prefs.putUShort("stpd", stepsToday);
+  prefs.putUInt("stpday", stepsDay);
+  prefs.putUShort("stprm", stepRem);
   prefs.putUChar("bond", bond);
   prefs.putUShort("medal", medals);
   prefs.putUShort("tmedal", totalMedals);
@@ -1361,6 +1411,10 @@ void Pet::load() {
   streak = prefs.getUShort("strk", 0);
   bestStreak = prefs.getUShort("bstrk", 0);
   lastCareDay = prefs.getUInt("cday", 0);
+  coins = prefs.getUInt("coin", 0);
+  stepsToday = prefs.getUShort("stpd", 0);
+  stepsDay = prefs.getUInt("stpday", 0);
+  stepRem = prefs.getUShort("stprm", 0);
   bond = prefs.getUChar("bond", 0);
   medals = prefs.getUShort("medal", 0);
   totalMedals = prefs.getUShort("tmedal", 0);

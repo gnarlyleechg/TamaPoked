@@ -157,3 +157,9 @@ bool audioEnabled() { return true; }
 static int g_resetReason = ESP_RST_POWERON;
 esp_reset_reason_t emuResetReason() { return g_resetReason; }
 void emuSetResetReason(int r) { g_resetReason = r; }
+// Step counter stubs: the emulator has no accelerometer.
+#include "imustep.h"
+void imuStepsBegin() {}
+void imuStepsPump(uint32_t) {}
+uint16_t imuStepsTake() { return 0; }
+bool imuStepsOk() { return false; }
