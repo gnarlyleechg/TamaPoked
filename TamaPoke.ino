@@ -150,6 +150,7 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+void openClock();            // defined further down; loop() opens it from the BOOT button
 int clockH = 12, clockM = 0;  // hora en edicion
 
 // escena de bano: espuma sobre el bicho y limpieza al reventar
