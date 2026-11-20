@@ -21,6 +21,14 @@ enum Sfx : uint8_t {
   SFX_SUPER,    // super effective
   SFX_FAINT,    // something goes down
   SFX_VICTORY,  // the fight is won
+  // kids build: care and minigame sounds (append-only, the table is positional)
+  SFX_SLEEP,    // soft lullaby when he goes to bed
+  SFX_WATER,    // splash for the bath
+  SFX_FART,     // short fart when he poops
+  SFX_BOUNCE,   // ball game: a hit on the ball
+  SFX_PUNCH,    // punching bag: a hit
+  SFX_ARROW,    // reaction game: target hit
+  SFX_SAD,      // reaction game: target missed
   SFX_COUNT
 };
 

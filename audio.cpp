@@ -81,7 +81,7 @@ static bool es8311Init() {
 struct Note { uint16_t f, ms; };
 
 static const Note N_TAP[]    = {{880, 35}};
-static const Note N_EAT[]    = {{660, 45}, {0, 12}, {660, 45}};
+static const Note N_EAT[]    = {{784, 50}, {988, 50}, {0, 25}, {784, 50}, {1175, 150}};  // happy little munch
 static const Note N_PLAY[]   = {{784, 45}, {988, 60}};
 static const Note N_HEART[]  = {{1047, 55}, {1319, 90}};
 static const Note N_HATCH[]  = {{523, 80}, {659, 80}, {784, 110}, {1047, 170}};
@@ -101,11 +101,24 @@ static const Note N_FAINT[]  = { {520, 90}, {400, 110}, {300, 140}, {200, 200} }
 static const Note N_VICTORY[] = { {784, 120}, {784, 120}, {784, 120}, {1047, 320},
                                   {880, 140}, {1047, 420} };
 
+// Noise notes: f has bit 15 set and the low bits are the noise period (small =
+// bright hiss, large = low rumble). Everything else is a pulse tone in Hz.
+#define NZ(p) ((uint16_t)(0x8000 | (p)))
+static const Note N_SLEEP[]  = {{523, 220}, {0, 40}, {392, 140}, {0, 40}, {392, 140}, {0, 40}, {330, 380}};
+static const Note N_WATER[]  = {{NZ(3), 45}, {NZ(5), 40}, {1500, 14}, {NZ(3), 45}, {NZ(6), 40}, {1900, 14}, {NZ(4), 60}};
+static const Note N_FART[]   = {{NZ(90), 55}, {NZ(70), 45}, {NZ(110), 60}, {NZ(80), 40}};
+static const Note N_BOUNCE[] = {{330, 25}, {523, 30}, {440, 40}};
+static const Note N_PUNCH[]  = {{NZ(60), 30}, {NZ(100), 55}};
+static const Note N_ARROW[]  = {{1900, 14}, {1500, 14}, {NZ(80), 45}};
+static const Note N_SAD[]    = {{392, 140}, {349, 140}, {311, 140}, {262, 360}};
+
 static const SfxDef SFX[SFX_COUNT] = {
-  {N_TAP, 1}, {N_EAT, 3}, {N_PLAY, 2}, {N_HEART, 2}, {N_HATCH, 4},
+  {N_TAP, 1}, {N_EAT, 5}, {N_PLAY, 2}, {N_HEART, 2}, {N_HATCH, 4},
   {N_EVOLVE, 5}, {N_MEDAL, 5}, {N_DENY, 2}, {N_BYE, 3}, {N_LEVEL, 2},
   {N_HIT, 2}, {N_BEAM, 3}, {N_STATUS, 3}, {N_SUPER, 3}, {N_FAINT, 4},
   {N_VICTORY, 6},
+  {N_SLEEP, 7}, {N_WATER, 7}, {N_FART, 4}, {N_BOUNCE, 3}, {N_PUNCH, 2},
+  {N_ARROW, 3}, {N_SAD, 4},
 };
 
 // A loop, not a one-shot: the task walks it and starts over.
@@ -200,9 +213,12 @@ static void audioTask(void *) {
         if (!ampOn) { digitalWrite(PA, HIGH); delay(6); ampOn = true; }
         const SfxDef &d = SFX[id];
         for (uint8_t i = 0; i < d.len; i++) {
-          uint16_t f = hzToGb(d.n[i].f);
+          uint16_t raw = d.n[i].f;
+          uint16_t f = (raw & 0x8000) ? 0 : hzToGb(raw);
           // percussion for the impact cues, a pulse for everything else
-          if (id == SFX_HIT || id == SFX_FAINT)
+          if (raw & 0x8000)
+            gSyn.noise(13, -1, 2, d.n[i].ms, raw & 0x7FFF);
+          else if (id == SFX_HIT || id == SFX_FAINT)
             gSyn.noise(13, -1, 2, d.n[i].ms, (uint16_t)(4 + i * 4));
           else if (f)
             gSyn.note(0, f, 1, 14, -1, 4, d.n[i].ms);

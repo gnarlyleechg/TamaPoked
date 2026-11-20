@@ -1943,7 +1943,7 @@ void onTap(int16_t x, int16_t y) {
       if (uiButtonDisabled(i)) { sfxPlay(SFX_DENY); return; }
       sfxPlay(SFX_TAP);
       if (i == BTN_FOOD) feedMenuUntil = millis() + 6000;
-      else if (i == BTN_LIGHT) pet.toggleLight();
+      else if (i == BTN_LIGHT) { pet.toggleLight(); if (pet.sleeping) sfxPlay(SFX_SLEEP); }
       else if (i == BTN_BATH) startBath();
       else trainOpen = true;
       return;
@@ -2451,7 +2451,7 @@ void gameTap(int16_t x, int16_t y) {
   }
   if (onBall) {  // toque a la bola!
     gameScore++;
-    sfxPlay(SFX_PLAY);
+    sfxPlay(SFX_BOUNCE);
     // golpe mas suave: impulso moderado que crece poco a poco con la puntuacion
     float lift = 6.6f + (gameScore > 16 ? 3.5f : gameScore * 0.22f);
     ballVY = -lift;
@@ -2523,6 +2523,7 @@ void startSack() {
 void sackTap() {
   if (millis() >= sackUntil) return;  // ya termino el tiempo
   sackHits++;
+  sfxPlay(SFX_PUNCH);
   sackShake = 16;  // sacude el saco
 }
 
@@ -4299,8 +4300,10 @@ void spdTap(int16_t x, int16_t y) {
   int dx = x - spdX, dy = y - spdY;
   if (dx * dx + dy * dy <= (SPD_R + 14) * (SPD_R + 14)) {
     spdHits++;
-    sfxPlay(SFX_TAP);
+    sfxPlay(SFX_ARROW);
     spdSpawn();
+  } else {
+    sfxPlay(SFX_SAD);  // tapped empty space
   }
 }
 
@@ -4352,6 +4355,7 @@ void renderSpeed() {
   // target expired?
   if (now - spdBorn > spdLife()) {
     spdMisses++;
+    sfxPlay(SFX_SAD);
     spdSpawn();
   }
 
@@ -5982,6 +5986,7 @@ void startBath() {
   if (pet.isEgg() || pet.sleeping || pet.ceremony || bathUntil) return;
   bathUntil = millis() + 3000;
   bathPending = true;
+  sfxPlay(SFX_WATER);
   int cx = (int)beh.x;
   for (auto &b : bubbles) {
     b.x = cx - 70 + random(140);

@@ -199,7 +199,7 @@ void Pet::tick() {
 
   fullness = clamp100(fullness - 1);  // kids build: hunger drains at half speed
   energy = clamp100(energy - 1);
-  if (fullness > 40 && poops < 3 && random(100) < 15) poops++;
+  if (fullness > 40 && poops < 3 && random(100) < 15) { poops++; sfxPlay(SFX_FART); }
 
   hygiene = clamp100(hygiene - 1 - 2 * poops);  // kids build: gentler mess penalty
   // el sobrepeso da pereza: la energia cae el doble
