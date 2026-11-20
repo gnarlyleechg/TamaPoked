@@ -3936,6 +3936,23 @@ void renderBattle() {
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(low[i]) * 12) / 2, y + 14);
       gfx->print(low[i]);
     }
+  } else if (btlMenu == 3) {           // "Run away?" -- YES left, NO under the old RUN spot
+    gfx->fillRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_WHITE);
+    gfx->drawRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_INK);
+    gfx->setTextColor(UI_INK);
+    gfx->setTextSize(2);
+    gfx->setCursor(CX - (int)strlen(T(S_BTL_RUN_Q)) * 6, BTL_GRID_Y + 14);
+    gfx->print(T(S_BTL_RUN_Q));
+    const char *yn[2] = { T(S_YES), T(S_NO) };
+    for (int i = 0; i < 2; i++) {
+      int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
+      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, i ? UI_BAR_OK : UI_TRACK);
+      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      gfx->setTextColor(UI_INK);
+      gfx->setTextSize(2);
+      gfx->setCursor(x + (BTL_CELL_W - (int)strlen(yn[i]) * 12) / 2, y + 14);
+      gfx->print(yn[i]);
+    }
   } else if (btlMenu == 2) {
     drawBtlBack();
     // who to bring on instead; the current one and anything fainted is inert
@@ -4103,7 +4120,13 @@ void battleTap(int16_t x, int16_t y) {
       return;
     }
     if (btlCellHit(2, x, y)) { sfxPlay(SFX_TAP); btlMenu = 2; return; }
-    if (btlCellHit(3, x, y)) { btlRun(); return; }
+    if (btlCellHit(3, x, y)) { sfxPlay(SFX_TAP); btlMenu = 3; return; }   // asks first
+    return;
+  }
+  if (btlMenu == 3) {         // only an explicit YES leaves the fight
+    if (btlCellHit(2, x, y)) { btlRun(); return; }
+    sfxPlay(SFX_TAP);
+    btlMenu = 0;              // NO, or a tap anywhere else, stays in the fight
     return;
   }
   if (btlMenu == 2) {

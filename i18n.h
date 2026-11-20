@@ -130,6 +130,7 @@ enum StrId : uint8_t {
   S_RELEASE_GONE,   // ...and the warning under it: this one does not come back
   S_BOX_TAKE,       // box detail sheet: move this creature into the party
   S_RETIRE_GONE,    // retire confirm: an early retire is not banked either
+  S_BTL_RUN_Q,      // battle: "Run away?" before leaving a fight
   STR_COUNT
 };
 
