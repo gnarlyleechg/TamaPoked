@@ -28,10 +28,13 @@ jobs:
           "GFX Library for Arduino@1.6.9" SensorLib@0.5.1 XPowersLib@0.3.3 U8g2@2.36.19
 
       - name: Compile
-        run: >
-          arduino-cli compile --warnings=all
-          --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
-          --output-dir out .
+        run: |
+          # arduino-cli needs the sketch folder to be named like the .ino file
+          mkdir -p "$RUNNER_TEMP/TamaPoke"
+          tar --exclude=.git -cf - . | tar -xf - -C "$RUNNER_TEMP/TamaPoke"
+          arduino-cli compile --warnings=all \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+            --output-dir "$PWD/out" "$RUNNER_TEMP/TamaPoke"
 
       - name: Collect the flash files
         run: |
