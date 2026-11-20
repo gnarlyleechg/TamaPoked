@@ -29,6 +29,7 @@ enum Sfx : uint8_t {
   SFX_PUNCH,    // punching bag: a hit
   SFX_ARROW,    // reaction game: target hit
   SFX_SAD,      // reaction game: target missed
+  SFX_PURR,     // petting him
   SFX_COUNT
 };
 

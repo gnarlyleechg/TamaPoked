@@ -632,6 +632,10 @@ void IRAM_ATTR touchIsr() { gTouchIrq = true; }
 uint32_t lastRender = 0;
 // proteccion del AMOLED: atenuado por inactividad
 uint32_t lastInteract = 0;
+// Screen brightness 1..5, set on the settings screen and kept in its own NVS
+// namespace so the pet's save format is untouched.
+static const uint8_t BRIGHT_LV[5] = {60, 100, 140, 180, 230};
+uint8_t gBrightLvl = 4;
 uint8_t dimStage = 0;        // 0 despierto, 1 atenuado (90s), 2 casi apagado (5min)
 bool swallowGesture = false; // el toque que despierta no acciona nada
 uint32_t holdStart = 0;     // pulsacion larga sobre el bicho
@@ -652,6 +656,15 @@ void setup() {
   Serial.printf("TamaPoke fw v%s\n", FW_VERSION);
   bootReport();   // why the last run ended, and what it was doing
   loadLang();  // idioma guardado (ES por defecto)
+  {
+    Preferences bp;
+    if (bp.begin("tkids", true)) {
+      uint8_t b = bp.getUChar("bright", 4);
+      gBrightLvl = (b >= 1 && b <= 5) ? b : 4;
+      bp.end();
+    }
+  }
+  pinMode(0, INPUT_PULLUP);   // BOOT button (GPIO0) opens the settings screen
   Wire.begin(IIC_SDA, IIC_SCL);
   // CST9217 (tactil), AXP2101 (PMU) y PCF85063 (RTC) comparten este bus I2C.
   // Red de seguridad para PMU/RTC (SensorLib NO respeta este timeout en el
@@ -798,6 +811,27 @@ void loop() {
     }
   }
 
+  // BOOT button: opens the settings screen from the main screen, closes it again
+  {
+    static bool lastBoot = false;
+    static uint32_t bootAt = 0;
+    bool down = digitalRead(0) == LOW;
+    if (down && !lastBoot && now - bootAt > 300) {
+      bootAt = now;
+      if (screenOff || dimStage > 0) {
+        lastInteract = now;               // a dark panel: the press just wakes it
+        if (screenOff) { screenOff = false; pet.setScreenOff(false); }
+      } else if (clockOpen) {
+        clockOpen = false;
+      } else if (uiCurrentScreen() == SCR_MAIN) {
+        openClock();
+        sfxPlay(SFX_TAP);
+        lastInteract = now;
+      }
+    }
+    lastBoot = down;
+  }
+
   updateBrightness(now);
 
   // vuelca el autoguardado periodico SOLO con la pantalla atenuada/apagada o
@@ -842,7 +876,7 @@ void updateBrightness(uint32_t now) {
   }
   uint32_t idle = now - lastInteract;
   dimStage = (idle > 300000) ? 2 : (idle > 90000) ? 1 : 0;
-  uint8_t target = pet.sleeping ? 25 : (usbPresent() ? 180 : 145);
+  uint8_t target = pet.sleeping ? 25 : BRIGHT_LV[gBrightLvl - 1];
   if (dimStage == 1) target = pet.sleeping ? 10 : 60;
   else if (dimStage == 2) target = 8;
   if (screenOff) target = 0;
@@ -1959,7 +1993,7 @@ void onTap(int16_t x, int16_t y) {
   // tocar al bicho = caricia
   if (inPetZone(x, y)) {
     pet.caress();
-    if (!pet.sleeping) sfxPlay(SFX_HEART);
+    if (!pet.sleeping) sfxPlay(SFX_PURR);
   }
 }
 
@@ -2872,7 +2906,7 @@ void renderClock() {
   gfx->fillRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_WHITE);
   gfx->drawRoundRect(LANG_PILL_X, LANG_PILL_Y, LANG_PILL_W, LANG_PILL_H, 8, UI_INK);
   char lp[10];
-  snprintf(lp, sizeof(lp), "%s >", LANG_CODES[gLang]);
+  snprintf(lp, sizeof(lp), "BRT %u", gBrightLvl);
   gfx->setTextColor(UI_INK);
   gfx->setTextSize(2);
   gfx->setCursor(LANG_PILL_X + (LANG_PILL_W - (int)strlen(lp) * 12) / 2, LANG_PILL_Y + 8);
@@ -2923,7 +2957,10 @@ void clockTap(int16_t x, int16_t y) {
       return;
     }
     if (x >= LANG_PILL_X && x < LANG_PILL_X + LANG_PILL_W) {  // cicla idioma
-      sfxPlay(SFX_TAP);  // kids build: language is fixed to English
+      gBrightLvl = (gBrightLvl % 5) + 1;      // brightness 1..5, wraps
+      Preferences bp;
+      if (bp.begin("tkids", false)) { bp.putUChar("bright", gBrightLvl); bp.end(); }
+      sfxPlay(SFX_TAP);
       return;
     }
   }

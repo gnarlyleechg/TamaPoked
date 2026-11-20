@@ -81,7 +81,7 @@ static bool es8311Init() {
 struct Note { uint16_t f, ms; };
 
 static const Note N_TAP[]    = {{880, 35}};
-static const Note N_EAT[]    = {{784, 50}, {988, 50}, {0, 25}, {784, 50}, {1175, 150}};  // happy little munch
+static const Note N_EAT[]    = {{392, 60}, {494, 60}, {0, 25}, {392, 60}, {587, 150}};  // happy little munch, low and mellow
 static const Note N_PLAY[]   = {{784, 45}, {988, 60}};
 static const Note N_HEART[]  = {{1047, 55}, {1319, 90}};
 static const Note N_HATCH[]  = {{523, 80}, {659, 80}, {784, 110}, {1047, 170}};
@@ -110,6 +110,9 @@ static const Note N_FART[]   = {{NZ(90), 55}, {NZ(70), 45}, {NZ(110), 60}, {NZ(8
 static const Note N_BOUNCE[] = {{330, 25}, {523, 30}, {440, 40}};
 static const Note N_PUNCH[]  = {{NZ(60), 30}, {NZ(100), 55}};
 static const Note N_ARROW[]  = {{1900, 14}, {1500, 14}, {NZ(80), 45}};
+// A purr is a low tone switched on and off about 25 times a second.
+static const Note N_PURR[]   = {{110, 24}, {0, 16}, {110, 24}, {0, 16}, {110, 24}, {0, 16}, {110, 24}, {0, 16},
+                                {110, 24}, {0, 16}, {110, 24}, {0, 16}, {110, 24}, {0, 16}, {110, 24}, {0, 16}};
 static const Note N_SAD[]    = {{392, 140}, {349, 140}, {311, 140}, {262, 360}};
 
 static const SfxDef SFX[SFX_COUNT] = {
@@ -118,7 +121,7 @@ static const SfxDef SFX[SFX_COUNT] = {
   {N_HIT, 2}, {N_BEAM, 3}, {N_STATUS, 3}, {N_SUPER, 3}, {N_FAINT, 4},
   {N_VICTORY, 6},
   {N_SLEEP, 7}, {N_WATER, 7}, {N_FART, 4}, {N_BOUNCE, 3}, {N_PUNCH, 2},
-  {N_ARROW, 3}, {N_SAD, 4},
+  {N_ARROW, 3}, {N_SAD, 4}, {N_PURR, 16},
 };
 
 // A loop, not a one-shot: the task walks it and starts over.
@@ -192,6 +195,12 @@ static void pump(uint32_t ms) {
   }
 }
 
+static bool isLightSfx(uint8_t id) {
+  return id == SFX_TAP || id == SFX_PLAY || id == SFX_HEART || id == SFX_BOUNCE ||
+         id == SFX_PUNCH || id == SFX_ARROW || id == SFX_PURR || id == SFX_EAT ||
+         id == SFX_WATER || id == SFX_SAD || id == SFX_FART;
+}
+
 static void audioTask(void *) {
   uint8_t id;
   // where each music channel has got to, and when its current note ends
@@ -225,6 +234,9 @@ static void audioTask(void *) {
           else
             gSyn.silence(0);
           pump(d.n[i].ms);
+          // a short cue gives way to the next one at once, so rapid taps in a
+          // game sound NOW instead of queueing up behind each other
+          if (isLightSfx(id) && uxQueueMessagesWaiting(gQ)) break;
         }
       }
       continue;
@@ -308,7 +320,10 @@ void audioBegin() {
 }
 
 void sfxPlay(uint8_t id) {
-  if (gReady && gOn && gQ) xQueueSend(gQ, &id, 0);  // descarta si la cola esta llena
+  if (!(gReady && gOn && gQ)) return;
+  // light cues are dropped when a backlog has already built up; jingles always queue
+  if (isLightSfx(id) && uxQueueMessagesWaiting(gQ) >= 2) return;
+  xQueueSend(gQ, &id, 0);  // descarta si la cola esta llena
 }
 
 void audioSetEnabled(bool on) {

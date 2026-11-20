@@ -30,6 +30,11 @@ inline void delay(uint32_t ms) {
   (void)ms;
 }
 inline void pinMode(int, int) {}
+inline int digitalRead(int) { return 1; }  // emulator: no physical buttons, always released
+#ifndef LOW
+#define LOW 0
+#define HIGH 1
+#endif
 inline int digitalPinToInterrupt(int p) { return p; }
 
 // There is no interrupt controller here, so the handler is kept in a slot and
