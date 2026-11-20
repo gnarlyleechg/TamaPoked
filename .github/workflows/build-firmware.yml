@@ -8,6 +8,9 @@ on:
     branches: [kids-version]
     paths-ignore: ["**.md", "web/**", "docs/**"]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,3 +55,13 @@ jobs:
           name: tamapoke-flash-files
           path: flash/
           retention-days: 30
+
+      - name: Publish the installer page files (docs/)
+        run: |
+          mkdir -p docs/firmware
+          cp flash/bootloader.bin flash/partitions.bin flash/boot_app0.bin flash/app.bin docs/firmware/
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet || git commit -m "Installer: publish latest build"
+          git push
