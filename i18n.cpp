@@ -286,7 +286,8 @@ void loadLang() {
   p.begin("tamapoke", true);  // solo lectura
   uint8_t v = p.getUChar("lang", LANG_DEFAULT);
   p.end();
-  gLang = (v < LANG_COUNT) ? (Lang)v : LANG_DEFAULT;
+  (void)v;
+  gLang = LANG_EN;  // kids build: English only
 }
 
 void setLang(Lang l) {

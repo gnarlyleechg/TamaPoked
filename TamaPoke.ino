@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include "party.h"
 #include "save.h"
+#include "backupsd.h"
 #include "pet.h"
 #include "sdmon.h"
 #include "rtcbat.h"
@@ -687,6 +688,9 @@ void setup() {
   party.begin();
   pet.begin();
   sdBegin();
+  // Kids build: a flash with "erase" empties the save. If the SD has a valid backup, bring it back
+  // before the starter screen ever shows, then restart so every module reloads it.
+  if (pet.awaitingStarter() && sdBackupRestoreFresh()) { delay(200); ESP.restart(); }
   thumbs.load();
 
   // reloj real: aplica el tiempo que estuvo apagado
@@ -747,6 +751,8 @@ void loop() {
   bool runReady = pet.canRunawayNow();
   if (runReady && !wasRunReady) sfxPlay(SFX_DENY);
   wasRunReady = runReady;
+
+  if (!pet.awaitingStarter()) sdBackupTick(rtcEpoch(), now);   // kids build: one SD backup per real day (never of an empty save)
 
   handleTouch();
   handleSerial();
@@ -1044,6 +1050,7 @@ void handleSerial() {
     inN = 0;
     if (ok) { Serial.println("DONE"); delay(100); ESP.restart(); }
   } else if (line == "WIPE") {
+    sdBackupDelete();       // kids build: a deliberate WIPE also removes the SD backup
     pet.factoryReset();     // borra NVS y reinicia -> partida nueva (eleccion de inicial)
     Serial.println("DONE");
     delay(100);
@@ -2915,8 +2922,7 @@ void clockTap(int16_t x, int16_t y) {
       return;
     }
     if (x >= LANG_PILL_X && x < LANG_PILL_X + LANG_PILL_W) {  // cicla idioma
-      setLang((Lang)((gLang + 1) % LANG_COUNT));
-      sfxPlay(SFX_TAP);
+      sfxPlay(SFX_TAP);  // kids build: language is fixed to English
       return;
     }
   }

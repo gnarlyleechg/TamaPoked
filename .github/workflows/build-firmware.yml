@@ -1,0 +1,51 @@
+name: Build firmware (kids version)
+
+# Compiles the sketch in GitHub's cloud and keeps the four files you flash from a browser.
+# Library versions are the ones the sibling Life sim fork's CI uses; this fork does not pin its own.
+on:
+  workflow_dispatch:
+  push:
+    branches: [kids-version]
+    paths-ignore: ["**.md", "web/**", "docs/**"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli config init --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.10
+
+      - name: Install libraries
+        run: >
+          arduino-cli lib install
+          "GFX Library for Arduino@1.6.9" SensorLib@0.5.1 XPowersLib@0.3.3 U8g2@2.36.19
+
+      - name: Compile
+        run: >
+          arduino-cli compile --warnings=all
+          --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+          --output-dir out .
+
+      - name: Collect the flash files
+        run: |
+          mkdir -p flash
+          cp out/TamaPoke.ino.bootloader.bin flash/bootloader.bin
+          cp out/TamaPoke.ino.partitions.bin flash/partitions.bin
+          cp out/TamaPoke.ino.bin flash/app.bin
+          BOOT=$(find ~/.arduino15 -name boot_app0.bin | head -n 1)
+          cp "$BOOT" flash/boot_app0.bin
+          printf 'bootloader.bin 0x0\npartitions.bin 0x8000\nboot_app0.bin 0xe000\napp.bin 0x10000\n' > flash/OFFSETS.txt
+          ls -l flash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tamapoke-flash-files
+          path: flash/
+          retention-days: 30
