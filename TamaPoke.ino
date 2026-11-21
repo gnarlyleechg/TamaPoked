@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.20"
+#define FW_VERSION "3.21"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -2140,11 +2140,11 @@ void drawScene(uint8_t biome, uint32_t now, bool night) {
 
   // sol o luna
   if (night) {
-    gfx->fillCircle(360, 78, 24, C565(0xe8, 0xee, 0xf5));
-    gfx->fillCircle(370, 72, 22, lerp565(top, bot, 78, HORIZON));  // creciente
+    gfx->fillCircle(398, 132, 22, C565(0xe8, 0xee, 0xf5));
+    gfx->fillCircle(407, 126, 20, lerp565(top, bot, 132, HORIZON));  // creciente
     for (auto &st : STARS) gfx->fillRect(st[0], st[1], 4, 4, UI_WHITE);
   } else if (h < 18) {
-    gfx->fillCircle(360, 84, 26, h < 8 ? C565(0xff, 0xd9, 0x8a) : C565(0xff, 0xe7, 0x9f));
+    gfx->fillCircle(398, 138, 24, h < 8 ? C565(0xff, 0xd9, 0x8a) : C565(0xff, 0xe7, 0x9f));
     drawClouds(now, C565(0xff, 0xff, 0xff));
   } else {
     gfx->fillCircle(233, HORIZON - 6, 34, C565(0xff, 0xf1, 0xc8));  // sol poniente
