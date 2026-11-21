@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.19"
+#define FW_VERSION "3.20"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -213,6 +213,7 @@ uint8_t treasureLoot[3] = {0, 0, 0};
 char actMsg[34] = "";
 uint8_t penShots = 0, penGoals = 0, penPhase = 0, penGoalie = 1, penZone = 1;  // penalty kicks (state 3)
 int16_t penKickX = 0;
+uint8_t penRes[5] = {0, 0, 0, 0, 0};   // 1 = goal, 0 = saved, per kick
 bool chessOpen = false;       // chess vs the board (menu row)
 Chess chessG;
 uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
@@ -5736,6 +5737,72 @@ static void drawFishScene() {
   }
 }
 
+// ---- treasure chests ----
+static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   // 100 x 90 box
+  uint16_t wood = C565(150, 100, 50), dark = C565(100, 62, 28), gold = 0xFEA0;
+  if (chosen) gfx->fillRoundRect(x - 6, y - 8, 112, 104, 12, CH_LAST);           // highlight behind the one picked
+  gfx->fillRoundRect(x + 4, y + 36, 92, 48, 6, wood);                            // body
+  gfx->fillRect(x + 4, y + 52, 92, 5, dark);
+  gfx->drawRoundRect(x + 4, y + 36, 92, 48, 6, UI_INK);
+  gfx->fillRect(x + 20, y + 36, 8, 48, gold); gfx->fillRect(x + 72, y + 36, 8, 48, gold);   // straps
+  if (!open) {
+    gfx->fillRoundRect(x + 4, y + 16, 92, 26, 12, wood);                           // lid, shut
+    gfx->drawRoundRect(x + 4, y + 16, 92, 26, 12, UI_INK);
+    gfx->fillRect(x + 20, y + 18, 8, 22, gold); gfx->fillRect(x + 72, y + 18, 8, 22, gold);
+    gfx->fillRoundRect(x + 42, y + 34, 16, 16, 3, gold);                           // lock
+    gfx->fillCircle(x + 50, y + 41, 3, UI_INK);
+  } else {
+    gfx->fillRoundRect(x + 8, y + 30, 84, 12, 4, 0x2104);                          // the dark inside
+    gfx->fillRoundRect(x + 4, y - 4, 92, 22, 10, wood);                            // lid, tipped back
+    gfx->drawRoundRect(x + 4, y - 4, 92, 22, 10, UI_INK);
+    gfx->fillRect(x + 20, y - 2, 8, 18, gold); gfx->fillRect(x + 72, y - 2, 8, 18, gold);
+    for (int i = 0; i < 6 && i < (int)coins + 1; i++) {                            // a heap of coins
+      gfx->fillCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, gold);
+      gfx->drawCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, 0xC480);
+    }
+  }
+}
+
+// ---- penalty kicks ----
+static void drawPenaltyScene() {
+  const int L = 40, T = 100, W = 386, H = 236;
+  uint32_t now = millis();
+  gfx->fillRoundRect(L, T, W, H, 14, C565(70, 160, 80));                           // the pitch
+  for (int i = 0; i < 6; i++) if (i & 1) gfx->fillRect(L + 4, T + 20 + i * 34, W - 8, 34, C565(60, 148, 72));   // mowing stripes
+  gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
+  int gl = CX - 111, gt = T + 14, gw = 222, gh = 86;                               // goal and net
+  gfx->fillRect(gl, gt, gw, gh, C565(40, 95, 50));
+  for (int i = 0; i <= gw; i += 12) gfx->drawFastVLine(gl + i, gt, gh, C565(120, 170, 120));
+  for (int j = 0; j <= gh; j += 12) gfx->drawFastHLine(gl, gt + j, gw, C565(120, 170, 120));
+  gfx->fillRect(gl - 4, gt - 4, gw + 8, 5, 0xFFFF); gfx->fillRect(gl - 4, gt - 4, 5, gh + 4, 0xFFFF); gfx->fillRect(gl + gw - 1, gt - 4, 5, gh + 4, 0xFFFF);
+  gfx->drawRect(gl - 30, gt + gh, gw + 60, 60, 0xFFFF);                             // the box
+  gfx->fillCircle(CX, T + 196, 3, 0xFFFF);                                           // the penalty spot
+  int kx = CX, ky = gt + gh - 22;                                                    // the keeper
+  if (penPhase == 1) kx = CX - 74 + penGoalie * 74;
+  else kx = CX + (int)(sinf(now / 260.0f) * 10);                                     // shuffles while waiting
+  int lean = (penPhase == 1) ? (penGoalie - 1) * 10 : 0;
+  gfx->fillRoundRect(kx - 9 + lean, ky - 14, 18, 30, 5, 0xFD20);                     // body
+  gfx->fillCircle(kx + lean, ky - 22, 8, C565(240, 200, 160));                       // head
+  gfx->fillRect(kx - 9 + lean, ky + 14, 7, 12, C565(30, 30, 90)); gfx->fillRect(kx + 2 + lean, ky + 14, 7, 12, C565(30, 30, 90));
+  int ay = (penPhase == 1) ? ky - 24 : ky - 4;                                       // arms up when diving
+  gfx->fillRect(kx - 24 + lean, ay, 15, 6, 0xFD20); gfx->fillRect(kx + 9 + lean, ay, 15, 6, 0xFD20);
+  gfx->fillCircle(kx - 26 + lean, ay + 3, 5, 0xFFFF); gfx->fillCircle(kx + 26 + lean, ay + 3, 5, 0xFFFF);   // gloves
+  int bx = CX, by = T + 186;                                                         // the ball
+  if (penPhase == 1) { bx = CX - 74 + penZone * 74; by = gt + gh - 40; }
+  gfx->fillCircle(bx, by, 9, 0xFFFF); gfx->drawCircle(bx, by, 9, 0x2104); gfx->fillCircle(bx, by, 3, 0x2104);
+  if (penPhase == 0 && penShots < 5) {                                                // aiming crosshair sweeping the goal
+    uint32_t t = now % 1400;
+    int pos = t < 700 ? (int)t : (int)(1400 - t);
+    penKickX = (int16_t)(CX - 100 + pos * 200 / 700);
+    gfx->drawCircle(penKickX, gt + 40, 10, 0xF800); gfx->drawCircle(penKickX, gt + 40, 5, 0xF800);
+    gfx->drawFastHLine(penKickX - 14, gt + 40, 28, 0xF800); gfx->drawFastVLine(penKickX, gt + 26, 28, 0xF800);
+  }
+  for (int i = 0; i < 5; i++) {                                                       // five score pips
+    uint16_t c = i < penShots ? (penRes[i] ? 0x07E0 : 0xF800) : C565(200, 200, 200);
+    gfx->fillCircle(CX - 48 + i * 24, T + H - 14, 8, c); gfx->drawCircle(CX - 48 + i * 24, T + H - 14, 8, UI_INK);
+  }
+}
+
 void renderAct() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -5774,36 +5841,18 @@ void renderAct() {
     return;
   }
   if (actState == 3) {                         // penalty kicks
-    gfx->fillRect(60, 140, 346, 200, C565(70, 160, 80));
-    gfx->drawRect(60, 140, 346, 200, UI_INK);
-    gfx->drawRect(CX - 111, 160, 222, 80, 0xFFFF);           // the goal
-    gfx->drawFastVLine(CX - 37, 160, 80, 0xC618);
-    gfx->drawFastVLine(CX + 37, 160, 80, 0xC618);
-    int gx = CX - 74 + penGoalie * 74;                        // the keeper
-    if (penPhase == 0) gx = CX;
-    gfx->fillCircle(gx, 205, 16, 0xFD20);
-    snprintf(b, sizeof(b), "Goals %u/%u", penGoals, penShots);
+    drawPenaltyScene();
+    gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
-    gfx->setCursor(CX - (int)strlen(b) * 6, 106);
-    gfx->print(b);
-    if (penPhase == 0 && penShots < 5) {                      // aiming: a marker sweeps the goal
-      uint32_t t = millis() % 1400;
-      int pos = t < 700 ? (int)t : (int)(1400 - t);          // 0..700..0
-      penKickX = (int16_t)(CX - 100 + pos * 200 / 700);
-      gfx->fillCircle(penKickX, 200, 8, 0xF800);
-      gfx->drawCircle(penKickX, 200, 8, 0xFFFF);
+    const char *line = (penPhase == 0 && penShots < 5) ? "tap to shoot!" : actMsg;
+    gfx->setCursor(CX - (int)strlen(line) * 6, 346);
+    gfx->print(line);
+    if (penShots >= 5) {
       gfx->setTextSize(1);
-      gfx->setCursor(CX - 54, 300);
-      gfx->print("tap to shoot!");
-    } else {
-      int bx = CX - 74 + penZone * 74;
-      gfx->fillCircle(bx, 215, 8, 0xFFFF);
-      gfx->setTextSize(2);
-      gfx->setCursor(CX - (int)strlen(actMsg) * 6, 310);
-      gfx->print(actMsg);
+      gfx->setCursor(CX - 54, 368);
+      gfx->print("tap to play again");
     }
-    gfx->setTextSize(1);
-    chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
+    chessButton(CX - 50, 386, 100, 38, "BACK", UI_TRACK);
     gfx->flush();
     return;
   }
@@ -5815,20 +5864,20 @@ void renderAct() {
   gfx->setCursor(CX - (int)strlen(tip) * 3, 92);
   gfx->print(tip);
   for (int i = 0; i < 3; i++) {
-    int x = 66 + i * 112, y = 160;
+    int x = 66 + i * 112, y = 150;
     bool open = treasurePick != 9;
-    gfx->fillRoundRect(x, y, 100, 80, 10, open && i == treasurePick ? CH_LAST : C565(150, 100, 50));
-    gfx->drawRoundRect(x, y, 100, 80, 10, UI_INK);
-    gfx->fillRect(x + 44, y + 30, 12, 18, UI_INK);
+    drawChest(x, y, open, open && i == treasurePick, open ? treasureLoot[i] : 0);
     if (open) {
       snprintf(b, sizeof(b), "%u", treasureLoot[i]);
       gfx->setTextSize(3);
-      gfx->setCursor(x + 50 - (int)strlen(b) * 9, y + 100);
+      gfx->setTextColor(UI_INK);
+      gfx->setCursor(x + 50 - (int)strlen(b) * 9, y + 108);
       gfx->print(b);
     }
   }
   if (treasurePick != 9) {
     gfx->setTextSize(1);
+    gfx->setTextColor(UI_INK);
     gfx->setCursor(CX - 54, 330);
     gfx->print("tap to play again");
   }
@@ -5854,6 +5903,7 @@ void actTap(int16_t x, int16_t y) {
     if (penPhase == 1) { penPhase = 0; actMsg[0] = 0; return; }    // next shot
     penZone = penKickX < CX - 37 ? 0 : (penKickX > CX + 37 ? 2 : 1);
     penGoalie = (uint8_t)random(3);
+    penRes[penShots] = (penZone != penGoalie) ? 1 : 0;
     penShots++;
     penPhase = 1;
     if (penZone != penGoalie) { penGoals++; snprintf(actMsg, sizeof(actMsg), "GOAL!"); sfxPlay(SFX_ARROW); }
