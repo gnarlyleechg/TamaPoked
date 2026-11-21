@@ -163,3 +163,8 @@ void imuStepsBegin() {}
 void imuStepsPump(uint32_t) {}
 uint16_t imuStepsTake() { return 0; }
 bool imuStepsOk() { return false; }
+
+// SD daily backup: no card in the emulator, so these do nothing.
+void sdBackupDelete() {}
+bool sdBackupRestoreFresh() { return false; }
+void sdBackupTick(uint32_t, uint32_t) {}

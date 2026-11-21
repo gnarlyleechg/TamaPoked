@@ -36,3 +36,6 @@ Nothing here has run on hardware yet. Tick off as you try each one. Flash with t
 ## Still on hold
 - Overnight USB-only test (unplug at night, check the pet is OK in the morning).
 - Battery, charging, 3D printing: need your approval first.
+
+## Already checked on the PC emulator (no board needed)
+Taps through every menu button, both side buttons, the bottom swipe, fishing, treasure, penalty, the shop and chess; each screen draws and refreshes. Coin payouts and the daily limit. Run it with `tools/emu/tests/run.sh walk`. The board-only items above (sound, steps, touch feel, SD backup, timing) cannot be checked this way.

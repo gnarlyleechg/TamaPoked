@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.17"
+#define FW_VERSION "3.18"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -5598,7 +5598,7 @@ static uint32_t actDayNow() { uint32_t e = rtcEpoch(); return e ? e / 86400 : pe
 
 static void actPay(uint8_t want) {
   uint8_t got = pet.earnActivity(want, actDayNow());
-  if (got == want && got) snprintf(actMsg, sizeof(actMsg), "+%u coins!", got);
+  if (got == want && got) snprintf(actMsg, sizeof(actMsg), got == 1 ? "+1 coin!" : "+%u coins!", got);
   else if (got) snprintf(actMsg, sizeof(actMsg), "+%u coins (daily limit)", got);
   else if (want) snprintf(actMsg, sizeof(actMsg), "daily limit - back tomorrow");
   else snprintf(actMsg, sizeof(actMsg), "nothing this time");
@@ -5791,8 +5791,9 @@ static const ShopItem SHOP_ITEMS[] = {
 #define SHOP_ROW_Y(i) (SHOP_Y + 62 + (i) * (SHOP_ROW_H + 6))
 
 void renderShop() {
-  for (int y = 0; y < 466; y += 2)
-    gfx->drawFastHLine(0, y, 466, gNight ? 0x0000 : 0x2104);
+  // A plain dark backdrop: dimming the previous frame let the menu behind it show through.
+  gfx->fillScreen(RGB565_BLACK);
+  gfx->fillCircle(CX, CY, 231, gNight ? 0x0000 : 0x2104);
   gfx->fillRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_WHITE);
   gfx->drawRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_INK);
 
