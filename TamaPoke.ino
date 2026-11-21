@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.16"
+#define FW_VERSION "3.17"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -211,6 +211,8 @@ uint32_t fishAt = 0, fishBiteAt = 0;
 uint8_t treasurePick = 9;     // 9 = nothing opened yet
 uint8_t treasureLoot[3] = {0, 0, 0};
 char actMsg[34] = "";
+uint8_t penShots = 0, penGoals = 0, penPhase = 0, penGoalie = 1, penZone = 1;  // penalty kicks (state 3)
+int16_t penKickX = 0;
 bool chessOpen = false;       // chess vs the board (menu row)
 Chess chessG;
 uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
@@ -5624,7 +5626,8 @@ void renderAct() {
     gfx->print(b);
     chessButton(CX - 90, 120, 180, 56, "FISHING", UI_BAR_OK);
     chessButton(CX - 90, 190, 180, 56, "TREASURE", UI_BAR_WARN);
-    chessButton(CX - 50, 290, 100, 44, "BACK", UI_TRACK);
+    chessButton(CX - 90, 260, 180, 56, "PENALTY", UI_BAR_BAD);
+    chessButton(CX - 50, 340, 100, 44, "BACK", UI_TRACK);
     gfx->flush();
     return;
   }
@@ -5647,6 +5650,40 @@ void renderAct() {
       gfx->setCursor(CX - 54, 356);
       gfx->print("tap to cast again");
     }
+    chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
+    gfx->flush();
+    return;
+  }
+  if (actState == 3) {                         // penalty kicks
+    gfx->fillRect(60, 140, 346, 200, C565(70, 160, 80));
+    gfx->drawRect(60, 140, 346, 200, UI_INK);
+    gfx->drawRect(CX - 111, 160, 222, 80, 0xFFFF);           // the goal
+    gfx->drawFastVLine(CX - 37, 160, 80, 0xC618);
+    gfx->drawFastVLine(CX + 37, 160, 80, 0xC618);
+    int gx = CX - 74 + penGoalie * 74;                        // the keeper
+    if (penPhase == 0) gx = CX;
+    gfx->fillCircle(gx, 205, 16, 0xFD20);
+    snprintf(b, sizeof(b), "Goals %u/%u", penGoals, penShots);
+    gfx->setTextSize(2);
+    gfx->setCursor(CX - (int)strlen(b) * 6, 106);
+    gfx->print(b);
+    if (penPhase == 0 && penShots < 5) {                      // aiming: a marker sweeps the goal
+      uint32_t t = millis() % 1400;
+      int pos = t < 700 ? (int)t : (int)(1400 - t);          // 0..700..0
+      penKickX = (int16_t)(CX - 100 + pos * 200 / 700);
+      gfx->fillCircle(penKickX, 200, 8, 0xF800);
+      gfx->drawCircle(penKickX, 200, 8, 0xFFFF);
+      gfx->setTextSize(1);
+      gfx->setCursor(CX - 54, 300);
+      gfx->print("tap to shoot!");
+    } else {
+      int bx = CX - 74 + penZone * 74;
+      gfx->fillCircle(bx, 215, 8, 0xFFFF);
+      gfx->setTextSize(2);
+      gfx->setCursor(CX - (int)strlen(actMsg) * 6, 310);
+      gfx->print(actMsg);
+    }
+    gfx->setTextSize(1);
     chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
     gfx->flush();
     return;
@@ -5682,13 +5719,28 @@ void renderAct() {
 
 void actTap(int16_t x, int16_t y) {
   if (actState == 0) {
-    if (x >= CX - 60 && x <= CX + 60 && y >= 284 && y <= 340) { sfxPlay(SFX_TAP); actOpen = false; return; }
+    if (x >= CX - 60 && x <= CX + 60 && y >= 334 && y <= 390) { sfxPlay(SFX_TAP); actOpen = false; return; }
+    if (x >= CX - 90 && x <= CX + 90 && y >= 260 && y <= 316) { actState = 3; penShots = 0; penGoals = 0; penPhase = 0; actMsg[0] = 0; sfxPlay(SFX_TAP); return; }
     if (x >= CX - 90 && x <= CX + 90 && y >= 120 && y <= 176) { actState = 1; fishPhase = 0; actMsg[0] = 0; sfxPlay(SFX_TAP); return; }
     if (x >= CX - 90 && x <= CX + 90 && y >= 190 && y <= 246) { actState = 2; treasurePick = 9; actMsg[0] = 0; sfxPlay(SFX_TAP); return; }
     return;
   }
   if (x >= CX - 60 && x <= CX + 60 && y >= 372 && y <= 428) {       // BACK to the activity list
     sfxPlay(SFX_TAP); actState = 0; actMsg[0] = 0; return;
+  }
+  if (actState == 3) {
+    if (penShots >= 5) {                                           // round over: tap = play again
+      penShots = 0; penGoals = 0; penPhase = 0; actMsg[0] = 0; sfxPlay(SFX_TAP); return;
+    }
+    if (penPhase == 1) { penPhase = 0; actMsg[0] = 0; return; }    // next shot
+    penZone = penKickX < CX - 37 ? 0 : (penKickX > CX + 37 ? 2 : 1);
+    penGoalie = (uint8_t)random(3);
+    penShots++;
+    penPhase = 1;
+    if (penZone != penGoalie) { penGoals++; snprintf(actMsg, sizeof(actMsg), "GOAL!"); sfxPlay(SFX_ARROW); }
+    else { snprintf(actMsg, sizeof(actMsg), "saved!"); sfxPlay(SFX_SAD); }
+    if (penShots >= 5) actPay((uint8_t)(penGoals * 2));      // 2 coins a goal, within the daily cap
+    return;
   }
   if (actState == 1) {
     if (fishPhase == 0 || fishPhase == 3 || fishPhase == 4) {        // cast

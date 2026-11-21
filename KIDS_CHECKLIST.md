@@ -19,7 +19,7 @@ Nothing here has run on hardware yet. Tick off as you try each one. Flash with t
 - [ ] Walk about 100 steps carrying it: coins and the step count go up.
 - [ ] Shop: buy something, coins drop, item works.
 - [ ] A gym win pays coins.
-- [ ] Fishing and Treasure pay coins; after 60 coins in a day they say "daily limit".
+- [ ] Fishing, Treasure and Penalty pay coins (penalty: 5 kicks, 2 coins a goal); after 60 coins in a day they say "daily limit".
 
 ## Chess
 - [ ] Squares are easy to tap with a finger. Computer answers in about 1 second on HARD.
