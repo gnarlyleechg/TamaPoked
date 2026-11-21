@@ -75,10 +75,12 @@ int main() {
   closeAll(); actOpen = true; actState = 0; renderOk("activities list");
   pet.coins = 0; pet.actToday = 0;
   onTap(233, 148); CK(actState == 1, "FISHING opens"); renderOk("fishing");
-  onTap(233, 250); CK(fishPhase == 1, "tap casts the line");
+  renderOk("fishing idle");
+  onTap(233, 250); CK(fishPhase == 1, "tap casts the line"); renderOk("fishing waiting");
   onTap(233, 250); CK(fishPhase == 4, "tapping before a bite loses the fish");
   onTap(233, 250); actStep(fishBiteAt + 1); CK(fishPhase == 2, "the bobber dips when a fish bites"); renderOk("fishing (bite)");
   onTap(233, 250); CK(fishPhase == 3 && pet.coins >= 2, "tapping on the bite catches it and pays coins");
+  { extern uint32_t fishAt; (void)fishAt; delay(350); renderOk("fishing caught"); }
   onTap(233, 250); onTap(233, 250); // cast, then too early
   onTap(233, 250); actStep(fishBiteAt + 1); actStep(fishBiteAt + 5000); CK(fishPhase == 4, "a late tap: the fish gets away");
 

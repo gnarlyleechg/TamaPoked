@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.18"
+#define FW_VERSION "3.19"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -5454,6 +5454,56 @@ static void chessButton(int x, int y, int w, int h, const char *label, uint16_t 
 #define CH_BACK_W 100
 #define CH_BACK_H 32
 
+// A chess piece as a flat silhouette in colour c, centred on (cx, cy), about 34 px tall.
+// t is CH_P..CH_K. Drawn five times (an outline made of four 1 px offsets, then the fill).
+static void chessGlyph(int cx, int cy, int t, uint16_t c, uint16_t det, bool detail) {
+  gfx->fillRoundRect(cx - 12, cy + 10, 24, 6, 2, c);                 // base
+  switch (t) {
+    case CH_P:
+      gfx->fillCircle(cx, cy - 7, 6, c);
+      gfx->fillTriangle(cx - 9, cy + 10, cx + 9, cy + 10, cx, cy - 3, c);
+      gfx->fillRect(cx - 6, cy + 3, 12, 3, c);
+      break;
+    case CH_R:
+      gfx->fillRect(cx - 9, cy - 13, 18, 5, c);
+      gfx->fillRect(cx - 9, cy - 17, 4, 5, c); gfx->fillRect(cx - 2, cy - 17, 4, 5, c); gfx->fillRect(cx + 5, cy - 17, 4, 5, c);
+      gfx->fillRect(cx - 6, cy - 9, 12, 13, c);
+      gfx->fillRect(cx - 9, cy + 3, 18, 7, c);
+      break;
+    case CH_N:
+      gfx->fillTriangle(cx - 10, cy + 10, cx + 10, cy + 10, cx + 4, cy - 12, c);
+      gfx->fillTriangle(cx + 4, cy - 12, cx - 11, cy - 1, cx - 1, cy + 3, c);
+      gfx->fillTriangle(cx + 1, cy - 12, cx + 5, cy - 18, cx + 7, cy - 10, c);
+      if (detail) gfx->fillCircle(cx - 1, cy - 6, 2, det);
+      break;
+    case CH_B:
+      gfx->fillTriangle(cx - 9, cy + 10, cx + 9, cy + 10, cx, cy - 4, c);
+      gfx->fillCircle(cx, cy - 8, 6, c);
+      gfx->fillCircle(cx, cy - 16, 2, c);
+      gfx->fillRect(cx - 7, cy + 2, 14, 3, c);
+      if (detail) gfx->drawLine(cx + 1, cy - 13, cx + 4, cy - 8, det);
+      break;
+    case CH_Q:
+      gfx->fillTriangle(cx - 10, cy - 12, cx + 10, cy - 12, cx, cy - 1, c);
+      for (int i = -2; i <= 2; i++) gfx->fillCircle(cx + i * 5, cy - 14, 2, c);
+      gfx->fillTriangle(cx - 9, cy + 10, cx + 9, cy + 10, cx, cy - 4, c);
+      gfx->fillRect(cx - 7, cy + 2, 14, 3, c);
+      break;
+    case CH_K:
+      gfx->fillCircle(cx, cy - 5, 6, c);
+      gfx->fillRect(cx - 1, cy - 19, 3, 9, c); gfx->fillRect(cx - 4, cy - 16, 9, 3, c);
+      gfx->fillTriangle(cx - 10, cy + 10, cx + 10, cy + 10, cx, cy - 3, c);
+      gfx->fillRect(cx - 7, cy + 2, 14, 3, c);
+      break;
+  }
+}
+static void chessPiece(int cx, int cy, int t, bool white) {
+  uint16_t fill = white ? 0xFFFF : 0x2104, line = white ? 0x2104 : 0xC618;
+  static const int8_t OFF[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
+  for (int i = 0; i < 8; i++) chessGlyph(cx + OFF[i][0], cy + OFF[i][1], t, line, line, false);
+  chessGlyph(cx, cy, t, fill, line, true);
+}
+
 void renderChess() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -5486,14 +5536,7 @@ void renderChess() {
       int8_t p = chessG.b[s];
       if (checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
       if (p) {
-        bool wh = p > 0;
-        int t = wh ? p : -p;
-        gfx->fillCircle(x + 20, y + 20, 16, wh ? 0xFFFF : 0x2104);
-        gfx->drawCircle(x + 20, y + 20, 16, wh ? 0x2104 : 0xFFFF);
-        gfx->setTextColor(wh ? 0x2104 : 0xFFFF);
-        gfx->setTextSize(2);
-        gfx->setCursor(x + 14, y + 12);
-        gfx->print("?PNBRQK"[t]);
+        chessPiece(x + 20, y + 20, p > 0 ? p : -p, p > 0);
       }
     }
   }
@@ -5610,6 +5653,89 @@ void actStep(uint32_t now) {
   else if (fishPhase == 2 && now - fishAt > 1000) { fishPhase = 4; snprintf(actMsg, sizeof(actMsg), "it got away..."); sfxPlay(SFX_SAD); }
 }
 
+// ---- the fishing scene: your creature on a little dock, rod out over the water ----
+static void fishDraw(int x, int y, bool faceLeft) {          // a small orange fish
+  int d = faceLeft ? -1 : 1;
+  gfx->fillRoundRect(x - 13, y - 7, 26, 14, 7, 0xFD20);
+  gfx->fillTriangle(x - d * 11, y, x - d * 22, y - 8, x - d * 22, y + 8, 0xFD20);
+  gfx->fillCircle(x + d * 7, y - 2, 2, 0x0000);
+  gfx->drawRoundRect(x - 13, y - 7, 26, 14, 7, 0xA2A0);
+}
+static void fishLine(int x0, int y0, int x1, int y1, int sag) {   // a drooping fishing line
+  int px = x0, py = y0;
+  for (int i = 1; i <= 10; i++) {
+    int x = x0 + (x1 - x0) * i / 10;
+    int y = y0 + (y1 - y0) * i / 10 + sag * (i * (10 - i)) / 25;
+    gfx->drawLine(px, py, x, y, 0xFFFF);
+    px = x; py = y;
+  }
+}
+static void drawFishScene() {
+  const int L = 40, T = 108, W = 386, H = 250;     // the window
+  const int WATER_Y = 262;
+  uint32_t now = millis();
+  gfx->fillRoundRect(L, T, W, H, 14, C565(150, 205, 240));                   // sky
+  gfx->fillCircle(L + W - 52, T + 40, 18, 0xFEA0);                            // sun
+  gfx->fillCircle(L + 230, T + 34, 11, 0xFFFF); gfx->fillCircle(L + 248, T + 30, 14, 0xFFFF); gfx->fillCircle(L + 268, T + 36, 10, 0xFFFF);
+  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, C565(50, 120, 190)); // water
+  gfx->fillRect(L, WATER_Y, W, 16, C565(50, 120, 190));
+  for (int i = 0; i < 6; i++) {                                               // little waves
+    int wx = L + 150 + i * 42 + (int)((now / 120) % 20) - 10, wy = WATER_Y + 20 + (i % 3) * 22;
+    gfx->drawFastHLine(wx, wy, 14, C565(120, 180, 230));
+  }
+  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(160, 110, 60));                 // the dock
+  for (int i = 0; i < 5; i++) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y - 2, 12, C565(110, 70, 35));
+  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(110, 70, 35));
+  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(110, 70, 35));
+  gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
+
+  int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
+  if (pmd.loaded) drawPmdAct(PMD_IDLE, petX, ground, now, true, false, 3);
+  else if (mon.loaded) {
+    int sc = (mon.h * 2 > 130) ? 1 : 2, w = mon.w * sc, h = mon.h * sc;
+    uint16_t fm = mon.frameMs ? mon.frameMs : 100, fi = (now / fm) % mon.frames;
+    const uint8_t *fr = mon.data + (uint32_t)fi * mon.w * mon.h;
+    int px = petX - w / 2, py = ground - h;
+    for (int r = 0; r < mon.h; r++)
+      for (int c = 0; c < mon.w; c++) {
+        uint8_t idx = fr[r * mon.w + c];
+        if (idx != 0xFF) gfx->fillRect(px + c * sc, py + r * sc, sc, sc, mon.pal[idx]);
+      }
+  } else {
+    gfx->fillCircle(petX, ground - 36, 34, C565(240, 190, 90));              // no art on the card: a stand-in
+    gfx->fillCircle(petX + 12, ground - 44, 3, 0x0000);
+  }
+
+  int handX = petX + 34, handY = ground - 52;                                 // the rod
+  int tipX = handX + 64, tipY = handY - 58;
+  gfx->drawLine(handX, handY, tipX, tipY, C565(120, 80, 40));
+  gfx->drawLine(handX, handY + 1, tipX, tipY + 1, C565(120, 80, 40));
+  gfx->drawLine(handX + 1, handY, tipX + 1, tipY, C565(120, 80, 40));
+
+  int bx = L + 270, by = WATER_Y + 18;                                        // bobber spot on the water
+  if (fishPhase == 0) {                                                       // line reeled in
+    gfx->drawLine(tipX, tipY, tipX, tipY + 38, 0xFFFF);
+    gfx->fillCircle(tipX, tipY + 44, 6, 0xF800); gfx->fillCircle(tipX, tipY + 41, 3, 0xFFFF);
+  } else if (fishPhase == 1 || fishPhase == 2 || fishPhase == 4) {
+    int dip = (fishPhase == 2) ? 12 : (((now / 450) & 1) ? 1 : 0);
+    if (fishPhase == 4) dip = -4;
+    fishLine(tipX, tipY, bx, by - 6 + dip, fishPhase == 4 ? 14 : 6);
+    gfx->drawCircle(bx, by + 8, 14 + (int)((now / 90) % 8), C565(150, 200, 240));   // ripples
+    if (fishPhase == 2) {
+      gfx->drawCircle(bx, by + 8, 26 + (int)((now / 60) % 6), 0xFFFF);
+      for (int i = 0; i < 5; i++) gfx->fillCircle(bx - 20 + i * 10, by - 14 - (int)((now / 40 + i * 7) % 16), 2, 0xFFFF);
+      gfx->setTextSize(4); gfx->setTextColor(0xF800); gfx->setCursor(petX - 6, ground - 150); gfx->print("!");
+    }
+    gfx->fillCircle(bx, by + dip, 7, 0xF800); gfx->fillCircle(bx, by - 3 + dip, 4, 0xFFFF);
+  } else {                                                                    // phase 3: it jumps and is caught
+    uint32_t t = now - fishAt; if (t > 700) t = 700;
+    float u = t / 700.0f;
+    int fx = bx + (int)((tipX - bx) * u), fy = by - (int)(sinf(3.14159f * u) * 80) - (int)((by - tipY - 40) * u);
+    fishLine(tipX, tipY, fx, fy - 8, 3);
+    fishDraw(fx, fy, true);
+  }
+}
+
 void renderAct() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -5632,25 +5758,18 @@ void renderAct() {
     return;
   }
   if (actState == 1) {                         // fishing
-    gfx->fillRect(60, 150, 346, 190, C565(70, 140, 200));
-    gfx->drawRect(60, 150, 346, 190, UI_INK);
-    int by = (fishPhase == 2) ? 262 : 232;      // the bobber dips on a bite
-    if (fishPhase == 1 && ((millis() / 400) & 1)) by = 228;   // gentle bob while waiting
-    gfx->fillCircle(CX, by, 14, 0xF800);
-    gfx->fillCircle(CX, by - 6, 8, 0xFFFF);
-    gfx->setTextSize(3);
-    if (fishPhase == 2) { gfx->setTextColor(0xF800); gfx->setCursor(CX - 9, 168); gfx->print("!"); }
+    drawFishScene();
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     const char *head = fishPhase == 0 ? "tap to cast" : fishPhase == 1 ? "wait for a bite..." : fishPhase == 2 ? "TAP NOW!" : actMsg;
-    gfx->setCursor(CX - (int)strlen(head) * 6, 106);
+    gfx->setCursor(CX - (int)strlen(head) * 6, 92);
     gfx->print(head);
     if (fishPhase == 3 || fishPhase == 4) {
       gfx->setTextSize(1);
-      gfx->setCursor(CX - 54, 356);
+      gfx->setCursor(CX - 54, 368);
       gfx->print("tap to cast again");
     }
-    chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
+    chessButton(CX - 50, 386, 100, 38, "BACK", UI_TRACK);
     gfx->flush();
     return;
   }
@@ -5750,7 +5869,7 @@ void actTap(int16_t x, int16_t y) {
     } else if (fishPhase == 2) {                                     // a bite: quick = bigger fish
       uint32_t react = millis() - fishAt;
       actPay((uint8_t)(2 + random(3) + (react < 450 ? 3 : 0)));
-      fishPhase = 3; sfxPlay(SFX_ARROW);
+      fishPhase = 3; fishAt = millis(); sfxPlay(SFX_ARROW);
     }
     return;
   }
