@@ -39,3 +39,10 @@ Nothing here has run on hardware yet. Tick off as you try each one. Flash with t
 
 ## Already checked on the PC emulator (no board needed)
 Taps through every menu button, both side buttons, the bottom swipe, fishing, treasure, penalty, the shop and chess; each screen draws and refreshes. Coin payouts and the daily limit. Run it with `tools/emu/tests/run.sh walk`. The board-only items above (sound, steps, touch feel, SD backup, timing) cannot be checked this way.
+
+## Battery-saving changes (v3.22) - check these too
+- [ ] Touch still feels instant while playing (the loop now naps 3 ms between passes).
+- [ ] Press PWR to turn the screen off, then press again: it wakes at once, picture normal, sound fine.
+- [ ] After 5 minutes untouched the screen dims and the animation is a bit choppier (on purpose); touching it wakes it.
+- [ ] Steps still count with the screen off (walk, wake, check the count).
+- [ ] If you have a USB power meter, note the current with the screen on, dimmed and off. This is the first real battery number.

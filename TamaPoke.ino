@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.21"
+#define FW_VERSION "3.22"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -923,9 +923,22 @@ void loop() {
   // 85 ms en juego/saco: margen seguro para que el redibujado no pise el envio
   // DMA del frame anterior (a 40-65 ms solapaba y causaba flashes negros; con
   // sprites grandes el dibujo tarda mas, asi que se deja colchon)
-  if (now - lastRender >= (uint32_t)((gameOpen || sackOpen || spdOpen) ? 85 : 100)) {
+  // Battery: no drawing while the screen is off, and a slower refresh once it has dimmed
+  // (the picture is barely visible then). Waking redraws at once because lastRender is old.
+  uint32_t frameMs = (gameOpen || sackOpen || spdOpen) ? 85 : (dimStage >= 2 ? 250 : 100);
+  if (!screenOff && now - lastRender >= frameMs) {
     lastRender = now;
     render();
+  }
+
+  // Battery: give the CPU a rest between passes instead of spinning flat out. A short nap
+  // while awake (touch still reads every few ms), longer when dark. At 80 MHz with the
+  // screen off the chip draws far less; it is back at 240 MHz the moment the screen wakes.
+  {
+    static uint32_t curMhz = 240;
+    uint32_t want = (screenOff && !lan.live()) ? 80 : 240;
+    if (want != curMhz) { curMhz = want; setCpuFrequencyMhz(want); }
+    delay(screenOff ? 40 : (dimStage >= 2 ? 15 : 3));
   }
 }
 
