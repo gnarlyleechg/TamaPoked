@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.13"
+#define FW_VERSION "3.14"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -113,15 +113,15 @@ bool menuOpen = false;
 // Four rows: PARTY and GYMS came out, since a swipe right and a swipe left now
 // reach them directly. Sized to the bezel -- the panel is 320 wide, so 160 from
 // the centre, and sqrt(233^2 - 160^2) = 169 means it can only span y 64..402.
-#define MENU_Y 75
+#define MENU_Y 68
 #define MENU_W 320
-#define MENU_H 316
-#define MENU_ROW_H 38
+#define MENU_H 332
+#define MENU_ROW_H 34
 #define MENU_ROW_GAP 4
 // 5 rows: STATS / POKEDEX / SETTINGS / RETIRE / CLOSE. At MENU_Y 75 the panel
 // spans 75..391 and the round display gives a half-width of 171 there against
 // the 160 a row needs, so the corners stay on glass.
-#define MENU_ROWS 7
+#define MENU_ROWS 8
 #define MENU_ROW_Y(i) (MENU_Y + 16 + (i) * (MENU_ROW_H + MENU_ROW_GAP))
 
 // Party screen. partyPick != 0 means the newcomer needs a slot: the player
@@ -152,6 +152,9 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+void renderAct();
+void actTap(int16_t x, int16_t y);
+void actStep(uint32_t now);
 void renderChess();
 void chessTap(int16_t x, int16_t y);
 void chessAiStep(uint32_t now);
@@ -193,6 +196,13 @@ bool sackNewHi = false;
 // DEF has no minigame -- it rises on its own from good wellbeing -- so its row
 // is informational and does not respond to a tap.
 bool trainOpen = false;
+bool actOpen = false;         // activities: fishing and treasure (menu row)
+uint8_t actState = 0;         // 0 menu, 1 fishing, 2 treasure
+uint8_t fishPhase = 0;        // 0 idle, 1 waiting for a bite, 2 BITE, 3 caught, 4 too early / got away
+uint32_t fishAt = 0, fishBiteAt = 0;
+uint8_t treasurePick = 9;     // 9 = nothing opened yet
+uint8_t treasureLoot[3] = {0, 0, 0};
+char actMsg[34] = "";
 bool chessOpen = false;       // chess vs the board (menu row)
 Chess chessG;
 uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
@@ -232,7 +242,7 @@ enum : uint8_t {
   SCR_STARTER = 0, SCR_REGION, SCR_GALLERY, SCR_DEXPICK, SCR_MOVEPICK, SCR_BOX,
   SCR_PARTY, SCR_KEYBOARD, SCR_CARD, SCR_PLAYER, SCR_CLOCK, SCR_GYM, SCR_GYMPICK,
   SCR_LAN, SCR_PICK, SCR_BATTLE, SCR_WIN, SCR_LEARN, SCR_TRAIN, SCR_MENU,
-  SCR_SHOP, SCR_CHESS, SCR_GAME, SCR_MAIN, SCR_COUNT
+  SCR_SHOP, SCR_CHESS, SCR_ACT, SCR_GAME, SCR_MAIN, SCR_COUNT
 };
 extern const char *const SCREEN_NAME[SCR_COUNT];   // const is internal linkage in C++
 
@@ -256,7 +266,7 @@ const char *const SCREEN_NAME[SCR_COUNT] = {
   "starter", "region", "gallery", "dexpick", "movepick", "box",
   "party", "keyboard", "card", "player", "clock", "gym", "gympick",
   "lan", "pick", "battle", "win", "learn", "train", "menu",
-  "shop", "chess", "minigame", "main"
+  "shop", "chess", "activities", "minigame", "main"
 };
 
 // Badge art for a region, or nullptr when that region has none yet.
@@ -869,6 +879,7 @@ void loop() {
   }
 
   chessAiStep(now);
+  actStep(now);
   audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
 
   updateBrightness(now);
@@ -1284,6 +1295,7 @@ void onSwipeV(int dir) {
   if (playerOpen) { playerOpen = false; return; }
   if (trainOpen) { trainOpen = false; return; }
   if (chessOpen) return;               // a chess game is only left with its BACK button
+  if (actOpen) return;                 // so are the activities
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) { movePickOpen = false; return; }
   if (boxOpen) { boxOpen = false; boxSel = 0; return; }   // vertical backs out
@@ -1655,6 +1667,7 @@ void onSwipe(int dir) {
   }
   if (trainOpen) { trainOpen = false; return; }
   if (chessOpen) return;               // a chess game is only left with its BACK button
+  if (actOpen) return;                 // so are the activities
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) {   // the picker is paged; without this its later pages
     uint8_t all[64];    // were simply unreachable
@@ -1831,6 +1844,7 @@ void onTap(int16_t x, int16_t y) {
     return;   // modal: nothing else on screen responds until it is answered
   }
   if (chessOpen) { chessTap(x, y); return; }
+  if (actOpen) { actTap(x, y); return; }
   if (shopOpen) { shopTap(x, y); return; }
   if (trainOpen) {
     bool inPanel = (x >= TRAIN_X && x <= TRAIN_X + TRAIN_W &&
@@ -1872,7 +1886,8 @@ void onTap(int16_t x, int16_t y) {
       }
       else if (i == 4) { shopOpen = true; shopMsg[0] = 0; }
       else if (i == 5) { chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; }
-      return;                                     // i == 6 is CLOSE: just shut
+      else if (i == 6) { actOpen = true; actState = 0; actMsg[0] = 0; }
+      return;                                     // i == 7 is CLOSE: just shut
     }
     return;
   }
@@ -2221,6 +2236,7 @@ uint8_t uiCurrentScreen() {
   if (trainOpen) return SCR_TRAIN;
   if (shopOpen) return SCR_SHOP;
   if (chessOpen) return SCR_CHESS;
+  if (actOpen) return SCR_ACT;
   if (menuOpen) return SCR_MENU;
   return SCR_MAIN;
 }
@@ -2306,6 +2322,10 @@ void render() {
   }
   if (chessOpen) {
     renderChess();
+    return;
+  }
+  if (actOpen) {
+    renderAct();
     return;
   }
   if (shopOpen) {
@@ -5312,6 +5332,7 @@ static void menuRowLabel(int i, char *out, size_t n) {
     case 3: snprintf(out, n, "%s", T(S_RETIRE)); break;
     case 4: snprintf(out, n, "%s", T(S_SHOP)); break;
     case 5: snprintf(out, n, "CHESS"); break;
+    case 6: snprintf(out, n, "ACTIVITIES"); break;
     default: snprintf(out, n, "%s", T(S_CLOSE)); break;
   }
 }
@@ -5400,7 +5421,6 @@ void renderTrain() {
 #define CH_SQ 40
 #define CH_X0 73
 #define CH_Y0 78
-#define C565(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 #define CH_LIGHT C565(240, 217, 181)
 #define CH_DARK  C565(181, 136, 99)
 #define CH_LAST  C565(205, 210, 106)
@@ -5554,6 +5574,135 @@ void chessTap(int16_t x, int16_t y) {
   }
   if (chessSel >= 0) sfxPlay(SFX_DENY);     // not a legal square for that piece
   chessSel = -1;
+}
+
+// ---------- activities: fishing and treasure (kids build) ----------
+// Two little games that pay coins, up to a daily cap (Pet::earnActivity). Both
+// are one-finger: fishing is a reaction test, treasure is a pick of three.
+static uint32_t actDayNow() { uint32_t e = rtcEpoch(); return e ? e / 86400 : pet.actDay; }
+
+static void actPay(uint8_t want) {
+  uint8_t got = pet.earnActivity(want, actDayNow());
+  if (got == want && got) snprintf(actMsg, sizeof(actMsg), "+%u coins!", got);
+  else if (got) snprintf(actMsg, sizeof(actMsg), "+%u coins (daily limit)", got);
+  else if (want) snprintf(actMsg, sizeof(actMsg), "daily limit - back tomorrow");
+  else snprintf(actMsg, sizeof(actMsg), "nothing this time");
+}
+
+void actStep(uint32_t now) {
+  if (!actOpen || actState != 1) return;
+  if (fishPhase == 1 && now >= fishBiteAt) { fishPhase = 2; fishAt = now; sfxPlay(SFX_STATUS); }
+  else if (fishPhase == 2 && now - fishAt > 1000) { fishPhase = 4; snprintf(actMsg, sizeof(actMsg), "it got away..."); sfxPlay(SFX_SAD); }
+}
+
+void renderAct() {
+  gfx->fillScreen(RGB565_BLACK);
+  gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  char b[40];
+  if (actState == 0) {
+    gfx->setCursor(CX - 66, 56);
+    gfx->print("ACTIVITIES");
+    uint16_t left = pet.actToday >= 60 ? 0 : 60 - pet.actToday;
+    snprintf(b, sizeof(b), "%u coins left to win today", (unsigned)left);
+    gfx->setTextSize(1);
+    gfx->setCursor(CX - (int)strlen(b) * 3, 88);
+    gfx->print(b);
+    chessButton(CX - 90, 120, 180, 56, "FISHING", UI_BAR_OK);
+    chessButton(CX - 90, 190, 180, 56, "TREASURE", UI_BAR_WARN);
+    chessButton(CX - 50, 290, 100, 44, "BACK", UI_TRACK);
+    gfx->flush();
+    return;
+  }
+  if (actState == 1) {                         // fishing
+    gfx->fillRect(60, 150, 346, 190, C565(70, 140, 200));
+    gfx->drawRect(60, 150, 346, 190, UI_INK);
+    int by = (fishPhase == 2) ? 262 : 232;      // the bobber dips on a bite
+    if (fishPhase == 1 && ((millis() / 400) & 1)) by = 228;   // gentle bob while waiting
+    gfx->fillCircle(CX, by, 14, 0xF800);
+    gfx->fillCircle(CX, by - 6, 8, 0xFFFF);
+    gfx->setTextSize(3);
+    if (fishPhase == 2) { gfx->setTextColor(0xF800); gfx->setCursor(CX - 9, 168); gfx->print("!"); }
+    gfx->setTextColor(UI_INK);
+    gfx->setTextSize(2);
+    const char *head = fishPhase == 0 ? "tap to cast" : fishPhase == 1 ? "wait for a bite..." : fishPhase == 2 ? "TAP NOW!" : actMsg;
+    gfx->setCursor(CX - (int)strlen(head) * 6, 106);
+    gfx->print(head);
+    if (fishPhase == 3 || fishPhase == 4) {
+      gfx->setTextSize(1);
+      gfx->setCursor(CX - 54, 356);
+      gfx->print("tap to cast again");
+    }
+    chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
+    gfx->flush();
+    return;
+  }
+  // treasure
+  gfx->setCursor(CX - 54, 56);
+  gfx->print("TREASURE");
+  gfx->setTextSize(1);
+  const char *tip = treasurePick == 9 ? "pick a chest" : actMsg;
+  gfx->setCursor(CX - (int)strlen(tip) * 3, 92);
+  gfx->print(tip);
+  for (int i = 0; i < 3; i++) {
+    int x = 66 + i * 112, y = 160;
+    bool open = treasurePick != 9;
+    gfx->fillRoundRect(x, y, 100, 80, 10, open && i == treasurePick ? CH_LAST : C565(150, 100, 50));
+    gfx->drawRoundRect(x, y, 100, 80, 10, UI_INK);
+    gfx->fillRect(x + 44, y + 30, 12, 18, UI_INK);
+    if (open) {
+      snprintf(b, sizeof(b), "%u", treasureLoot[i]);
+      gfx->setTextSize(3);
+      gfx->setCursor(x + 50 - (int)strlen(b) * 9, y + 100);
+      gfx->print(b);
+    }
+  }
+  if (treasurePick != 9) {
+    gfx->setTextSize(1);
+    gfx->setCursor(CX - 54, 330);
+    gfx->print("tap to play again");
+  }
+  chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
+  gfx->flush();
+}
+
+void actTap(int16_t x, int16_t y) {
+  if (actState == 0) {
+    if (x >= CX - 60 && x <= CX + 60 && y >= 284 && y <= 340) { sfxPlay(SFX_TAP); actOpen = false; return; }
+    if (x >= CX - 90 && x <= CX + 90 && y >= 120 && y <= 176) { actState = 1; fishPhase = 0; actMsg[0] = 0; sfxPlay(SFX_TAP); return; }
+    if (x >= CX - 90 && x <= CX + 90 && y >= 190 && y <= 246) { actState = 2; treasurePick = 9; actMsg[0] = 0; sfxPlay(SFX_TAP); return; }
+    return;
+  }
+  if (x >= CX - 60 && x <= CX + 60 && y >= 372 && y <= 428) {       // BACK to the activity list
+    sfxPlay(SFX_TAP); actState = 0; actMsg[0] = 0; return;
+  }
+  if (actState == 1) {
+    if (fishPhase == 0 || fishPhase == 3 || fishPhase == 4) {        // cast
+      fishPhase = 1; fishBiteAt = millis() + 1500 + random(2800); actMsg[0] = 0; sfxPlay(SFX_WATER);
+    } else if (fishPhase == 1) {                                     // too early
+      fishPhase = 4; snprintf(actMsg, sizeof(actMsg), "too early!"); sfxPlay(SFX_DENY);
+    } else if (fishPhase == 2) {                                     // a bite: quick = bigger fish
+      uint32_t react = millis() - fishAt;
+      actPay((uint8_t)(2 + random(3) + (react < 450 ? 3 : 0)));
+      fishPhase = 3; sfxPlay(SFX_ARROW);
+    }
+    return;
+  }
+  if (treasurePick == 9) {                                           // choose a chest
+    for (int i = 0; i < 3; i++) {
+      int cx = 66 + i * 112;
+      if (x < cx || x > cx + 100 || y < 160 || y > 240) continue;
+      static const uint8_t LOOT[10] = {0, 1, 2, 2, 3, 3, 4, 5, 6, 8};
+      for (int k = 0; k < 3; k++) treasureLoot[k] = LOOT[random(10)];
+      treasurePick = (uint8_t)i;
+      actPay(treasureLoot[i]);
+      sfxPlay(treasureLoot[i] ? SFX_HEART : SFX_SAD);
+      return;
+    }
+  } else {
+    treasurePick = 9; actMsg[0] = 0; sfxPlay(SFX_TAP);              // play again
+  }
 }
 
 // ---------- the coin shop (kids build) ----------

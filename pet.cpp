@@ -361,6 +361,19 @@ bool Pet::giveGift(uint8_t kind) {
   return true;
 }
 
+// Activities pay coins, but only up to a daily cap, so they are a treat rather
+// than something to grind. Returns how many coins were actually granted.
+#define ACT_DAILY_CAP 60
+uint8_t Pet::earnActivity(uint8_t n, uint32_t day) {
+  if (day != actDay) { actDay = day; actToday = 0; }
+  uint16_t room = actToday >= ACT_DAILY_CAP ? 0 : ACT_DAILY_CAP - actToday;
+  uint8_t got = n < room ? n : (uint8_t)room;
+  actToday += got;
+  earnCoins(got);
+  pendingSave = true;
+  return got;
+}
+
 void Pet::flushSave() {
   if (pendingSave) save();
 }
@@ -1345,6 +1358,8 @@ void Pet::save() {
   prefs.putUShort("stpd", stepsToday);
   prefs.putUInt("stpday", stepsDay);
   prefs.putUShort("stprm", stepRem);
+  prefs.putUShort("actd", actToday);
+  prefs.putUInt("actday", actDay);
   prefs.putUChar("bond", bond);
   prefs.putUShort("medal", medals);
   prefs.putUShort("tmedal", totalMedals);
@@ -1415,6 +1430,8 @@ void Pet::load() {
   stepsToday = prefs.getUShort("stpd", 0);
   stepsDay = prefs.getUInt("stpday", 0);
   stepRem = prefs.getUShort("stprm", 0);
+  actToday = prefs.getUShort("actd", 0);
+  actDay = prefs.getUInt("actday", 0);
   bond = prefs.getUChar("bond", 0);
   medals = prefs.getUShort("medal", 0);
   totalMedals = prefs.getUShort("tmedal", 0);

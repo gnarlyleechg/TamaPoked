@@ -127,6 +127,9 @@ public:
   uint16_t stepsToday = 0;
   uint32_t stepsDay = 0;      // the day number stepsToday belongs to
   uint16_t stepRem = 0;       // steps toward the next coin
+  uint16_t actToday = 0;      // coins from activities (fishing, treasure) today
+  uint32_t actDay = 0;
+  uint8_t earnActivity(uint8_t n, uint32_t day);   // returns what the daily cap allowed
   void addSteps(uint16_t n, uint32_t day);
   void earnCoins(uint32_t n);
   bool spendCoins(uint32_t n);

@@ -41,6 +41,14 @@ int main(){
   ck(!p.giveGift(4), "a vitamin is refused (and not charged) when nothing can train");
   ck(!p.giveGift(99), "an unknown gift is refused");
 
+  // activities pay up to a daily cap
+  p.coins = 0; p.actToday = 0; p.actDay = 0;
+  uint8_t g1 = p.earnActivity(8, 300), g2 = 0, tot = g1;
+  for (int i = 0; i < 20; i++) { g2 = p.earnActivity(8, 300); tot += g2; }
+  ck(tot == 60 && p.coins == 60, "activities stop paying after 60 coins in a day");
+  ck(p.earnActivity(8, 300) == 0, "and pay nothing more that day");
+  ck(p.earnActivity(8, 301) == 8, "a new day pays again");
+
   // coins are the player's: a reload keeps them
   p.coins = 77; p.flushSave(); p.earnCoins(0); p.giveGift(2);  // giveGift saves
   Pet q; q.begin();

@@ -36,6 +36,7 @@ const SaveField SAVE_FIELDS[] = {
   { "lang", SK_U8 },    { "snd", SK_BOOL },   { "vol", SK_U8 },
   // kids build: coins and steps
   { "coin", SK_U32 },   { "stpd", SK_U16 },   { "stpday", SK_U32 }, { "stprm", SK_U16 },
+  { "actd", SK_U16 },   { "actday", SK_U32 },
 };
 const uint16_t SAVE_FIELD_COUNT = sizeof(SAVE_FIELDS) / sizeof(SAVE_FIELDS[0]);
 
