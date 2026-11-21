@@ -30,6 +30,7 @@
 #include "save.h"
 #include "backupsd.h"
 #include "imustep.h"
+#include "chess.h"
 #include "pet.h"
 #include "sdmon.h"
 #include "rtcbat.h"
@@ -38,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.12"
+#define FW_VERSION "3.13"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -115,12 +116,12 @@ bool menuOpen = false;
 #define MENU_Y 75
 #define MENU_W 320
 #define MENU_H 316
-#define MENU_ROW_H 44
-#define MENU_ROW_GAP 6
+#define MENU_ROW_H 38
+#define MENU_ROW_GAP 4
 // 5 rows: STATS / POKEDEX / SETTINGS / RETIRE / CLOSE. At MENU_Y 75 the panel
 // spans 75..391 and the round display gives a half-width of 171 there against
 // the 160 a row needs, so the corners stay on glass.
-#define MENU_ROWS 6
+#define MENU_ROWS 7
 #define MENU_ROW_Y(i) (MENU_Y + 16 + (i) * (MENU_ROW_H + MENU_ROW_GAP))
 
 // Party screen. partyPick != 0 means the newcomer needs a slot: the player
@@ -151,6 +152,9 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+void renderChess();
+void chessTap(int16_t x, int16_t y);
+void chessAiStep(uint32_t now);
 void renderShop();
 void shopTap(int16_t x, int16_t y);
 void openClock();            // defined further down; loop() opens it from the BOOT button
@@ -189,6 +193,15 @@ bool sackNewHi = false;
 // DEF has no minigame -- it rises on its own from good wellbeing -- so its row
 // is informational and does not respond to a tap.
 bool trainOpen = false;
+bool chessOpen = false;       // chess vs the board (menu row)
+Chess chessG;
+uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
+uint8_t chessLevel = 1;       // 1 easy, 2 medium, 3 hard
+int8_t chessSel = -1;
+bool chessAiDue = false;
+uint32_t chessAiAt = 0, chessQuitUntil = 0;
+uint8_t chessEarned = 0;
+ChessResult chessRes = CHR_PLAYING;
 bool shopOpen = false;        // the coin shop (menu row)
 char shopMsg[28] = "";
 uint32_t shopMsgUntil = 0;
@@ -219,7 +232,7 @@ enum : uint8_t {
   SCR_STARTER = 0, SCR_REGION, SCR_GALLERY, SCR_DEXPICK, SCR_MOVEPICK, SCR_BOX,
   SCR_PARTY, SCR_KEYBOARD, SCR_CARD, SCR_PLAYER, SCR_CLOCK, SCR_GYM, SCR_GYMPICK,
   SCR_LAN, SCR_PICK, SCR_BATTLE, SCR_WIN, SCR_LEARN, SCR_TRAIN, SCR_MENU,
-  SCR_SHOP, SCR_GAME, SCR_MAIN, SCR_COUNT
+  SCR_SHOP, SCR_CHESS, SCR_GAME, SCR_MAIN, SCR_COUNT
 };
 extern const char *const SCREEN_NAME[SCR_COUNT];   // const is internal linkage in C++
 
@@ -243,7 +256,7 @@ const char *const SCREEN_NAME[SCR_COUNT] = {
   "starter", "region", "gallery", "dexpick", "movepick", "box",
   "party", "keyboard", "card", "player", "clock", "gym", "gympick",
   "lan", "pick", "battle", "win", "learn", "train", "menu",
-  "shop", "minigame", "main"
+  "shop", "chess", "minigame", "main"
 };
 
 // Badge art for a region, or nullptr when that region has none yet.
@@ -855,6 +868,7 @@ void loop() {
     }
   }
 
+  chessAiStep(now);
   audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
 
   updateBrightness(now);
@@ -1269,6 +1283,7 @@ void onSwipeV(int dir) {
   }
   if (playerOpen) { playerOpen = false; return; }
   if (trainOpen) { trainOpen = false; return; }
+  if (chessOpen) return;               // a chess game is only left with its BACK button
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) { movePickOpen = false; return; }
   if (boxOpen) { boxOpen = false; boxSel = 0; return; }   // vertical backs out
@@ -1639,6 +1654,7 @@ void onSwipe(int dir) {
     return;
   }
   if (trainOpen) { trainOpen = false; return; }
+  if (chessOpen) return;               // a chess game is only left with its BACK button
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) {   // the picker is paged; without this its later pages
     uint8_t all[64];    // were simply unreachable
@@ -1814,6 +1830,7 @@ void onTap(int16_t x, int16_t y) {
     }
     return;   // modal: nothing else on screen responds until it is answered
   }
+  if (chessOpen) { chessTap(x, y); return; }
   if (shopOpen) { shopTap(x, y); return; }
   if (trainOpen) {
     bool inPanel = (x >= TRAIN_X && x <= TRAIN_X + TRAIN_W &&
@@ -1854,7 +1871,8 @@ void onTap(int16_t x, int16_t y) {
         choiceKind = 3; choiceUntil = millis() + 12000;
       }
       else if (i == 4) { shopOpen = true; shopMsg[0] = 0; }
-      return;                                     // i == 5 is CLOSE: just shut
+      else if (i == 5) { chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; }
+      return;                                     // i == 6 is CLOSE: just shut
     }
     return;
   }
@@ -2202,6 +2220,7 @@ uint8_t uiCurrentScreen() {
   if (gameOpen || sackOpen || spdOpen) return SCR_GAME;
   if (trainOpen) return SCR_TRAIN;
   if (shopOpen) return SCR_SHOP;
+  if (chessOpen) return SCR_CHESS;
   if (menuOpen) return SCR_MENU;
   return SCR_MAIN;
 }
@@ -2283,6 +2302,10 @@ void render() {
   }
   if (trainOpen) {
     renderTrain();
+    return;
+  }
+  if (chessOpen) {
+    renderChess();
     return;
   }
   if (shopOpen) {
@@ -5288,6 +5311,7 @@ static void menuRowLabel(int i, char *out, size_t n) {
     case 2: snprintf(out, n, "%s", T(S_SETTINGS)); break;
     case 3: snprintf(out, n, "%s", T(S_RETIRE)); break;
     case 4: snprintf(out, n, "%s", T(S_SHOP)); break;
+    case 5: snprintf(out, n, "CHESS"); break;
     default: snprintf(out, n, "%s", T(S_CLOSE)); break;
   }
 }
@@ -5366,6 +5390,170 @@ void renderTrain() {
   gfx->setCursor(CX - (int)strlen(T(S_TR_DEF_HINT)) * 3, TRAIN_Y + TRAIN_H - 22);
   gfx->print(T(S_TR_DEF_HINT));
   gfx->flush();   // without this the panel never updates and the screen freezes
+}
+
+// ---------- chess (kids build) ----------
+// You play white, at the bottom, against the board. Tap a piece, then a square.
+// The engine is chess.cpp (perft-tested on the PC); this is only the screen.
+// A game can only be left with BACK, and BACK asks twice mid-game, so a stray
+// touch never throws a game away. Winning pays coins.
+#define CH_SQ 40
+#define CH_X0 73
+#define CH_Y0 78
+#define C565(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
+#define CH_LIGHT C565(240, 217, 181)
+#define CH_DARK  C565(181, 136, 99)
+#define CH_LAST  C565(205, 210, 106)
+#define CH_PICK  C565(130, 190, 90)
+
+static void chessButton(int x, int y, int w, int h, const char *label, uint16_t fill) {
+  gfx->fillRoundRect(x, y, w, h, 12, fill);
+  gfx->drawRoundRect(x, y, w, h, 12, UI_INK);
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  gfx->setCursor(x + (w - (int)strlen(label) * 12) / 2, y + h / 2 - 8);
+  gfx->print(label);
+}
+#define CH_BACK_X 183
+#define CH_BACK_Y 424
+#define CH_BACK_W 100
+#define CH_BACK_H 32
+
+void renderChess() {
+  gfx->fillScreen(RGB565_BLACK);
+  gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  if (chessState == 0) {
+    gfx->setCursor(CX - 30, 60);
+    gfx->print("CHESS");
+    gfx->setTextSize(1);
+    gfx->setCursor(CX - 66, 92);
+    gfx->print("you play white. pick a level");
+    chessButton(CX - 90, 120, 180, 52, "EASY", UI_BAR_OK);
+    chessButton(CX - 90, 184, 180, 52, "MEDIUM", UI_BAR_WARN);
+    chessButton(CX - 90, 248, 180, 52, "HARD", UI_BAR_BAD);
+    chessButton(CH_BACK_X, 340, CH_BACK_W, 44, "BACK", UI_TRACK);
+    gfx->flush();
+    return;
+  }
+  // the board
+  ChessMove mv[64];
+  int nmv = (chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
+  bool checked = chessG.inCheck(chessG.whiteToMove);
+  for (int r = 0; r < 8; r++) {
+    for (int f = 0; f < 8; f++) {
+      int s = r * 8 + f, x = CH_X0 + f * CH_SQ, y = CH_Y0 + (7 - r) * CH_SQ;
+      uint16_t col = ((r + f) & 1) ? CH_LIGHT : CH_DARK;
+      if (chessG.hasLast && (s == chessG.last.from || s == chessG.last.to)) col = CH_LAST;
+      if (s == chessSel) col = CH_PICK;
+      gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
+      int8_t p = chessG.b[s];
+      if (checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
+      if (p) {
+        bool wh = p > 0;
+        int t = wh ? p : -p;
+        gfx->fillCircle(x + 20, y + 20, 16, wh ? 0xFFFF : 0x2104);
+        gfx->drawCircle(x + 20, y + 20, 16, wh ? 0x2104 : 0xFFFF);
+        gfx->setTextColor(wh ? 0x2104 : 0xFFFF);
+        gfx->setTextSize(2);
+        gfx->setCursor(x + 14, y + 12);
+        gfx->print("?PNBRQK"[t]);
+      }
+    }
+  }
+  for (int i = 0; i < nmv; i++) {     // where the chosen piece can go
+    int x = CH_X0 + (mv[i].to % 8) * CH_SQ, y = CH_Y0 + (7 - mv[i].to / 8) * CH_SQ;
+    gfx->fillCircle(x + 20, y + 20, 6, CH_PICK);
+  }
+  // header and status
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  const char *lv = chessLevel == 1 ? "EASY" : chessLevel == 2 ? "MEDIUM" : "HARD";
+  char b[40];
+  snprintf(b, sizeof(b), "CHESS - %s", lv);
+  gfx->setCursor(CX - (int)strlen(b) * 6, 36);
+  gfx->print(b);
+  if (chessState == 1) {
+    snprintf(b, sizeof(b), "%s", chessAiDue ? "thinking..." : (checked ? "CHECK! your move" : "your move"));
+  } else if (chessRes == CHR_WHITE_WINS) snprintf(b, sizeof(b), "YOU WIN! +%u coins", chessEarned);
+  else if (chessRes == CHR_BLACK_WINS) snprintf(b, sizeof(b), "I won! +%u coins", chessEarned);
+  else snprintf(b, sizeof(b), "a draw! +%u coins", chessEarned);
+  gfx->setCursor(CX - (int)strlen(b) * 6, 402);
+  gfx->print(b);
+  bool sure = chessState == 1 && millis() < chessQuitUntil;
+  chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
+  gfx->flush();
+}
+
+static void chessFinish() {
+  chessRes = chessG.status();
+  if (chessRes == CHR_PLAYING) return;
+  chessState = 2;
+  chessAiDue = false;
+  chessSel = -1;
+  chessEarned = (chessRes == CHR_WHITE_WINS) ? chessLevel * 10 : (chessRes == CHR_BLACK_WINS) ? 2 : 5;
+  pet.earnCoins(chessEarned);
+  sfxPlay(chessRes == CHR_WHITE_WINS ? SFX_VICTORY : chessRes == CHR_BLACK_WINS ? SFX_SAD : SFX_TAP);
+}
+
+void chessAiStep(uint32_t now) {
+  if (!chessOpen || !chessAiDue || now < chessAiAt) return;
+  chessAiDue = false;
+  ChessMove m = chessG.aiMove(chessLevel, now);
+  bool cap = chessG.b[m.to] != 0;
+  chessG.apply(m);
+  sfxPlay(cap ? SFX_HIT : SFX_TAP);
+  chessFinish();
+}
+
+void chessTap(int16_t x, int16_t y) {
+  bool onBack = (x >= CH_BACK_X - 10 && x <= CH_BACK_X + CH_BACK_W + 10 && y >= (chessState == 0 ? 340 : CH_BACK_Y) - 6 &&
+                 y <= (chessState == 0 ? 384 : CH_BACK_Y + CH_BACK_H + 8));
+  if (chessState == 0) {
+    if (onBack) { sfxPlay(SFX_TAP); chessOpen = false; return; }
+    for (int i = 0; i < 3; i++) {
+      int by = 120 + i * 64;
+      if (x >= CX - 90 && x <= CX + 90 && y >= by && y <= by + 52) {
+        chessLevel = (uint8_t)(i + 1);
+        chessG.reset();
+        chessState = 1; chessSel = -1; chessAiDue = false; chessQuitUntil = 0;
+        sfxPlay(SFX_TAP);
+        return;
+      }
+    }
+    return;
+  }
+  if (onBack) {
+    if (chessState == 2 || millis() < chessQuitUntil) { sfxPlay(SFX_TAP); chessOpen = false; return; }
+    chessQuitUntil = millis() + 3000;       // mid-game: asks once more
+    sfxPlay(SFX_TAP);
+    return;
+  }
+  if (chessState == 2) {                    // tap the board after a game for a new one
+    sfxPlay(SFX_TAP);
+    chessState = 0;
+    return;
+  }
+  if (chessAiDue) return;                   // the board is thinking
+  chessQuitUntil = 0;
+  int f = (x - CH_X0) / CH_SQ, rr = (y - CH_Y0) / CH_SQ;
+  if (x < CH_X0 || y < CH_Y0 || f < 0 || f > 7 || rr < 0 || rr > 7) { chessSel = -1; return; }
+  int s = (7 - rr) * 8 + f;
+  if (chessG.b[s] > 0) {                    // one of your pieces: pick it up (or put it back)
+    chessSel = (chessSel == s) ? -1 : (int8_t)s;
+    sfxPlay(SFX_TAP);
+    return;
+  }
+  if (chessSel >= 0 && chessG.play(chessSel, s, CH_Q)) {
+    chessSel = -1;
+    sfxPlay(SFX_TAP);
+    chessFinish();
+    if (chessState == 1) { chessAiDue = true; chessAiAt = millis() + 250; }
+    return;
+  }
+  if (chessSel >= 0) sfxPlay(SFX_DENY);     // not a legal square for that piece
+  chessSel = -1;
 }
 
 // ---------- the coin shop (kids build) ----------

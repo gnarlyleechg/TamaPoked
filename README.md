@@ -3,7 +3,7 @@
 [![Flash in browser](https://img.shields.io/badge/flash-in%20browser-FF6B00?logo=googlechrome&logoColor=white)](https://dylanpdao.github.io/TamaPoke/web/)
 [![MakerWorld](https://img.shields.io/badge/MakerWorld-3D%20case-00AE42?logo=bambulab&logoColor=white)](https://makerworld.com/es/models/2937822-tamapoke-a-pokemon-pokeball-tamagotchi)
 ![Board](https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white)
-![Firmware](https://img.shields.io/badge/firmware-v3.12-8A2BE2)
+![Firmware](https://img.shields.io/badge/firmware-v3.13-8A2BE2)
 ![Code](https://img.shields.io/badge/code-MIT-blue)
 ![Languages](https://img.shields.io/badge/languages-6-FFCB05)
 [![Stars](https://img.shields.io/github/stars/DylanPDao/TamaPoke?style=flat&logo=github&color=yellow)](https://github.com/DylanPDao/TamaPoke/stargazers)
@@ -342,6 +342,8 @@ price before you accept it.
 | TOY | 8 coins, unlocks at 3 Pokemon in the Pokedex (fills joy) |
 | ENERGY DRINK | 8 coins, unlocks at 6 (fills energy) |
 | VITAMIN | 30 coins, unlocks at 12 (+3 training in a random stat with room; refused and not charged if none) |
+
+| Chess (menu, CHESS) | you play white against the board: EASY / MEDIUM / HARD pays 10 / 20 / 30 coins for a win, 5 for a draw, 2 for a loss |
 
 Coins and steps are the player's, like the streak: no ending clears them, and they are in the SD backup.
 
