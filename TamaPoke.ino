@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.14"
+#define FW_VERSION "3.15"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -121,8 +121,14 @@ bool menuOpen = false;
 // 5 rows: STATS / POKEDEX / SETTINGS / RETIRE / CLOSE. At MENU_Y 75 the panel
 // spans 75..391 and the round display gives a half-width of 171 there against
 // the 160 a row needs, so the corners stay on glass.
-#define MENU_ROWS 8
-#define MENU_ROW_Y(i) (MENU_Y + 16 + (i) * (MENU_ROW_H + MENU_ROW_GAP))
+#define MENU_ROWS 10
+// Kids build: the menu is a 2-column grid of buttons (opened by swiping up from
+// the bottom edge, or by tapping the name band). Button i sits at column i%2, row i/2.
+#define MENU_BTN_W 138
+#define MENU_BTN_H 52
+#define MENU_BTN_GAP 8
+#define MENU_BTN_X(i) (CX - MENU_BTN_W - MENU_BTN_GAP / 2 + ((i) % 2) * (MENU_BTN_W + MENU_BTN_GAP))
+#define MENU_BTN_Y(i) (MENU_Y + 14 + ((i) / 2) * (MENU_BTN_H + 6))
 
 // Party screen. partyPick != 0 means the newcomer needs a slot: the player
 // either taps someone to replace or lets it go.
@@ -1328,6 +1334,11 @@ void onSwipeV(int dir) {
   // Swipe down is the PLAYER card, up is the creature's. The clock lost this
   // gesture on purpose -- the menu's SETTINGS row already opens it, and the
   // player card is the thing you reach for far more often.
+  if (dir < 0 && tY0 >= 395 && !pet.ceremony && !confirmUntil && !feedMenuUntil) {
+    menuOpen = true;                // swipe up from the bottom edge: the menu
+    sfxPlay(SFX_TAP);
+    return;
+  }
   if (dir > 0) {
     if (!confirmUntil && !feedMenuUntil) playerOpen = true;
   } else if (!pet.isEgg() && !confirmUntil && !feedMenuUntil) {
@@ -1872,22 +1883,28 @@ void onTap(int16_t x, int16_t y) {
                     y >= MENU_Y && y <= MENU_Y + MENU_H);
     if (!inPanel) { menuOpen = false; return; }   // tap outside = back to the pet
     for (int i = 0; i < MENU_ROWS; i++) {
-      int ry = MENU_ROW_Y(i);
-      if (x < MENU_X + 18 || x > MENU_X + MENU_W - 18) continue;
-      if (y < ry || y > ry + MENU_ROW_H) continue;
+      int bx = MENU_BTN_X(i), by = MENU_BTN_Y(i);
+      if (x < bx || x > bx + MENU_BTN_W || y < by || y > by + MENU_BTN_H) continue;
       sfxPlay(SFX_TAP);
       menuOpen = false;
-      if (i == 0) { cardOpen = true; cardPage = 1; }   // straight to the stats page
-      else if (i == 1) { galleryOpen = true; galleryPick = true; galleryPage = 0; rpickPage = 0; galleryDetail = 0; galleryDirty = true; }
-      else if (i == 2) { openClock(); }
-      else if (i == 3) {
-        if (!pet.canRetireNow()) { sfxPlay(SFX_DENY); return; }
-        choiceKind = 3; choiceUntil = millis() + 12000;
+      switch (i) {
+        case 0: cardOpen = true; cardPage = 1; break;            // STATS: straight to the stats page
+        case 1: galleryOpen = true; galleryPick = true; galleryPage = 0; rpickPage = 0; galleryDetail = 0; galleryDirty = true; break;
+        case 2:                                                   // BATTLE: the gym ladder
+          if (!pet.ceremony && !confirmUntil) { gymOpen = true; gymPick = true; gymPage = 0; rpickPage = 0; }
+          break;
+        case 3: if (!pet.ceremony && !confirmUntil) partyOpen = true; break;
+        case 4: shopOpen = true; shopMsg[0] = 0; break;
+        case 5: chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; break;
+        case 6: actOpen = true; actState = 0; actMsg[0] = 0; break;
+        case 7: openClock(); break;
+        case 8:
+          if (!pet.canRetireNow()) { sfxPlay(SFX_DENY); return; }
+          choiceKind = 3; choiceUntil = millis() + 12000;
+          break;
+        default: break;                                           // CLOSE
       }
-      else if (i == 4) { shopOpen = true; shopMsg[0] = 0; }
-      else if (i == 5) { chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; }
-      else if (i == 6) { actOpen = true; actState = 0; actMsg[0] = 0; }
-      return;                                     // i == 7 is CLOSE: just shut
+      return;
     }
     return;
   }
@@ -5325,16 +5342,9 @@ void renderCard() {
 
 // Row labels are built fresh each frame because two of them carry live counts.
 static void menuRowLabel(int i, char *out, size_t n) {
-  switch (i) {
-    case 0: snprintf(out, n, "%s", T(S_STATS)); break;
-    case 1: snprintf(out, n, T(S_POKEDEX_FMT), pet.registeredCount(), DEX_COUNT); break;
-    case 2: snprintf(out, n, "%s", T(S_SETTINGS)); break;
-    case 3: snprintf(out, n, "%s", T(S_RETIRE)); break;
-    case 4: snprintf(out, n, "%s", T(S_SHOP)); break;
-    case 5: snprintf(out, n, "CHESS"); break;
-    case 6: snprintf(out, n, "ACTIVITIES"); break;
-    default: snprintf(out, n, "%s", T(S_CLOSE)); break;
-  }
+  static const char *const L[MENU_ROWS] = {"STATS", "POKEDEX", "BATTLE", "PARTY", "SHOP",
+                                           "CHESS", "ACTIVITIES", "SETTINGS", "RETIRE", "CLOSE"};
+  snprintf(out, n, "%s", L[i]);
 }
 
 void drawMenu() {
@@ -5347,17 +5357,16 @@ void drawMenu() {
   gfx->drawRoundRect(MENU_X, MENU_Y, MENU_W, MENU_H, 18, UI_INK);
 
   for (int i = 0; i < MENU_ROWS; i++) {
-    int y = MENU_ROW_Y(i);
+    int bx = MENU_BTN_X(i), by = MENU_BTN_Y(i);
     bool close = (i == MENU_ROWS - 1);
-    bool dead = (i == 3 && !pet.canRetireNow());   // an egg or a companion
-    gfx->fillRoundRect(MENU_X + 18, y, MENU_W - 36, MENU_ROW_H, 12,
-                       close || dead ? UI_TRACK : UI_BG_DAY);
-    gfx->drawRoundRect(MENU_X + 18, y, MENU_W - 36, MENU_ROW_H, 12, UI_INK);
+    bool dead = (i == 8 && !pet.canRetireNow());   // an egg or a companion
+    gfx->fillRoundRect(bx, by, MENU_BTN_W, MENU_BTN_H, 10, close || dead ? UI_TRACK : UI_BG_DAY);
+    gfx->drawRoundRect(bx, by, MENU_BTN_W, MENU_BTN_H, 10, UI_INK);
     char lbl[28];
     menuRowLabel(i, lbl, sizeof(lbl));
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
-    gfx->setCursor(CX - (int)strlen(lbl) * 6, y + MENU_ROW_H / 2 - 8);
+    gfx->setCursor(bx + MENU_BTN_W / 2 - (int)strlen(lbl) * 6, by + MENU_BTN_H / 2 - 8);
     gfx->print(lbl);
   }
 }
