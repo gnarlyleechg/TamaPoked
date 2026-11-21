@@ -47,12 +47,14 @@ static void renderOk(const char *what) {
     }
   }
 }
+void emuSetSpriteDir(const char *);
 int main() {
+  emuSetSpriteDir(SPRITE_DIR);
   setup(); for (int i = 0; i < 4; i++) loop();
   if (pet.awaitingStarter()) pet.chooseStarter(4);
   if (pet.isEgg()) pet.dbgHatchAs(25, false);
   while (pet.hasLearnOffer()) pet.declineLearn();
-  pet.ceremony = 0; pet.sleeping = false;
+  pet.ceremony = 0; pet.sleeping = false; for (int i = 0; i < 3; i++) loop();
   CK(!pet.isEgg(), "a creature is out of its egg");
 
   // --- side buttons

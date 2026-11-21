@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.22"
+#define FW_VERSION "3.23"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -5738,7 +5738,7 @@ static void drawFishScene() {
     if (fishPhase == 2) {
       gfx->drawCircle(bx, by + 8, 26 + (int)((now / 60) % 6), 0xFFFF);
       for (int i = 0; i < 5; i++) gfx->fillCircle(bx - 20 + i * 10, by - 14 - (int)((now / 40 + i * 7) % 16), 2, 0xFFFF);
-      gfx->setTextSize(4); gfx->setTextColor(0xF800); gfx->setCursor(petX - 6, ground - 150); gfx->print("!");
+      gfx->setTextSize(4); gfx->setTextColor(0xF800); gfx->setCursor(petX - 6, ground - 118); gfx->print("!");
     }
     gfx->fillCircle(bx, by + dip, 7, 0xF800); gfx->fillCircle(bx, by - 3 + dip, 4, 0xFFFF);
   } else {                                                                    // phase 3: it jumps and is caught
