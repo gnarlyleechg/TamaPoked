@@ -39,7 +39,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.15"
+#define FW_VERSION "3.16"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -158,6 +158,8 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+void drawSideButtons();
+bool sideButtonTap(int16_t x, int16_t y);
 void renderAct();
 void actTap(int16_t x, int16_t y);
 void actStep(uint32_t now);
@@ -2062,6 +2064,7 @@ void onTap(int16_t x, int16_t y) {
       return;
     }
   }
+  if (sideButtonTap(x, y)) return;
   // tapping the name/status band opens the menu. This band was inert before,
   // and it sits clear of inPetZone (which starts at y 95).
   if (y >= 28 && y < 94) {
@@ -2446,6 +2449,7 @@ void render() {
     gfx->fillRect(0, 312, 466, 154, gNight ? UI_BG_NIGHT : UI_BG_DAY);
     drawBars();
     drawButtons();
+    drawSideButtons();
     drawCelebration();
     if (pet.wantEvolveButton()) drawEvolveButton();        // CTA rojo: evolucionar
     else if (pet.canRunawayNow()) drawRunawayButton();     // CTA sombrio: escapada (abandono)
@@ -6785,6 +6789,48 @@ void drawBar(int x, int y, const char *label, uint8_t val) {
   gfx->fillRoundRect(bx, y, bw, bh, 4, UI_TRACK);
   int fw = (bw - 4) * val / 100;
   if (fw > 0) gfx->fillRoundRect(bx + 2, y + 2, fw, bh - 4, 3, fill);
+}
+
+// Kids build: two always-visible side buttons so nobody has to remember a swipe.
+// Left = BATTLE (gym ladder), right = MENU (everything else).
+#define SIDE_R 26
+#define SIDE_LX 46
+#define SIDE_RX 420
+#define SIDE_Y 236
+void drawSideButtons() {
+  if (pet.sleeping || pet.isEgg()) return;
+  uint16_t ink = 0x2104;   // dark on a white button, day or night
+  // BATTLE: a ball (red top, white bottom)
+  gfx->fillCircle(SIDE_LX, SIDE_Y, SIDE_R, UI_WHITE);
+  for (int dy = -SIDE_R + 2; dy < 0; dy++) {
+    int hw = (int)sqrtf((float)((SIDE_R - 1) * (SIDE_R - 1) - dy * dy));
+    gfx->drawFastHLine(SIDE_LX - hw, SIDE_Y + dy, 2 * hw, 0xE0A3);
+  }
+  gfx->drawFastHLine(SIDE_LX - SIDE_R + 1, SIDE_Y, 2 * SIDE_R - 2, ink);
+  gfx->fillCircle(SIDE_LX, SIDE_Y, 8, UI_WHITE);
+  gfx->drawCircle(SIDE_LX, SIDE_Y, 8, ink);
+  gfx->drawCircle(SIDE_LX, SIDE_Y, SIDE_R, ink);
+  // MENU: a 2x2 grid of squares
+  gfx->fillCircle(SIDE_RX, SIDE_Y, SIDE_R, UI_WHITE);
+  gfx->drawCircle(SIDE_RX, SIDE_Y, SIDE_R, ink);
+  for (int i = 0; i < 4; i++)
+    gfx->fillRoundRect(SIDE_RX - 15 + (i % 2) * 17, SIDE_Y - 15 + (i / 2) * 17, 13, 13, 3, ink);
+  gfx->setTextSize(1);
+  gfx->setTextColor(gNight ? UI_INK_NIGHT : UI_INK);
+  gfx->setCursor(SIDE_LX - 18, SIDE_Y + SIDE_R + 6);  gfx->print("BATTLE");
+  gfx->setCursor(SIDE_RX - 12, SIDE_Y + SIDE_R + 6);  gfx->print("MENU");
+}
+
+bool sideButtonTap(int16_t x, int16_t y) {
+  if (pet.sleeping || pet.isEgg() || pet.ceremony || confirmUntil) return false;
+  int r = SIDE_R + 14;                                   // generous finger target
+  if (abs(x - SIDE_LX) < r && abs(y - SIDE_Y) < r + 8) {
+    sfxPlay(SFX_TAP); gymOpen = true; gymPick = true; gymPage = 0; rpickPage = 0; return true;
+  }
+  if (abs(x - SIDE_RX) < r && abs(y - SIDE_Y) < r + 8) {
+    sfxPlay(SFX_TAP); menuOpen = true; return true;
+  }
+  return false;
 }
 
 void drawButtons() {

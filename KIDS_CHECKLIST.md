@@ -3,9 +3,11 @@
 Nothing here has run on hardware yet. Tick off as you try each one. Flash with the installer page; your pet is kept.
 
 ## Menu and settings
+- [ ] The round BATTLE button (left) opens the gym list; the MENU grid button (right) opens the menu. Both are easy to hit with a finger.
 - [ ] Swipe up from the very bottom edge opens the MENU (grid of buttons). Swipe up from the middle still opens the creature card.
 - [ ] Tapping the name band at the top also opens the menu.
 - [ ] Every button works: STATS, POKEDEX, BATTLE, PARTY, SHOP, CHESS, ACTIVITIES, SETTINGS, RETIRE, CLOSE.
+- [ ] SETTINGS from the menu works (the BOOT button is optional: it is not reachable on the 3D-printed case yet)
 - [ ] The BOOT button opens SETTINGS (brightness bars, volume, speaker icon).
 - [ ] Brightness bars: each tap changes the level and the screen really gets brighter or darker.
 
