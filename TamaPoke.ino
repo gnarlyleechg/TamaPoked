@@ -3953,12 +3953,35 @@ static void btlHpBar(int x, int y, int w, const Combatant &c, uint16_t shown) {
   gfx->drawRoundRect(x, y, w, 14, 4, UI_INK);
 }
 
+// A few broad value changes make the existing biome art feel like a stage
+// without extra bitmaps, new species art, or per-frame PSRAM allocations.
+static void btlDrawLowerDeck() {
+  const uint16_t nearCol = C565(0xe9, 0xe9, 0xe3);
+  const uint16_t farCol  = C565(0xc4, 0xd7, 0xd1);
+  for (int y = 254; y < 466; y += 24) {
+    const int h = ((466 - y) < 24) ? 466 - y : 24;
+    gfx->fillRect(0, y, 466, h, lerp565(farCol, nearCol, y - 254, 212));
+  }
+  gfx->fillRect(0, 253, 466, 3, C565(0x6b, 0x80, 0x76));
+}
+
+// Visual-only button wrapper; dimensions and touch hit areas stay unchanged.
+static void btlDrawButton(int x, int y, int w, int h, uint16_t color) {
+  gfx->fillRoundRect(x, y + 3, w, h, 10, UI_TRACK);
+  gfx->fillRoundRect(x, y, w, h, 10, color);
+  gfx->drawRoundRect(x, y, w, h, 10, UI_INK);
+  gfx->fillRect(x + 14, y + 4, w - 28, 2, UI_WHITE);
+}
+
 static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t who) {
-  // the scenes are busy, so the name and bar sit on their own plate rather
-  // than fighting the artwork for contrast
+  // Raised, species-accented name plates keep small text readable over scenery.
   int ph = (who == 0) ? 54 : 40;
+  gfx->fillRoundRect(tx - 6, ty - 5, 158, ph, 8, UI_TRACK);
   gfx->fillRoundRect(tx - 8, ty - 8, 158, ph, 8, UI_BG_DAY);
   gfx->drawRoundRect(tx - 8, ty - 8, 158, ph, 8, UI_INK);
+  const uint16_t accent = (c.dex >= 1 && c.dex <= DEX_COUNT)
+                            ? DEX_TBL[c.dex].accent : UI_INK;
+  gfx->fillRoundRect(tx - 6, ty + 1, 4, ph - 18, 2, accent);
   char l[28];
   snprintf(l, sizeof(l), "%s Lv.%u", c.name, c.level);
   gfx->setTextColor(UI_INK);
@@ -4008,6 +4031,14 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     uint32_t left = btlHitUntil[who] - now;
     ox += ((left / 50) % 2) ? 5 : -5;      // jitter
   }
+
+  // The shadow is anchored at the creature's real baseline. PMD sprites use
+  // a feet anchor at sy+78; the 16px thumbnail fallback is 48px tall at 3x.
+  // Drawing it before either sprite adds depth without changing animations.
+  const int footX = sx + 24;
+  const int footY = sy + (btlPmd[who].loaded ? 78 : 48);
+  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
+  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
 
   // Real PMD playback when the sprite streamed: attack while lunging, hurt
   // while flinching, idle otherwise. `has()` guards every one, because not
@@ -4133,9 +4164,9 @@ void renderBattle() {
   btlEaseBars();
   gfx->fillScreen(RGB565_BLACK);
   drawBattleBack();
-  // the lower band stays flat so the move grid and the HP text keep their
-  // contrast against it
-  gfx->fillRect(0, 254, 466, 212, UI_BG_DAY);
+  // Subtle ground gradient and horizon line; the existing controls remain
+  // in their original positions with the same generous touch regions.
+  btlDrawLowerDeck();
 
   // x=82 not 58: at y=60 the round bezel starts around x=77, and a longer
   // name like BLASTOISE was losing its first characters off the edge
@@ -4173,8 +4204,7 @@ void renderBattle() {
     // rows do not fit: the panel is round, and at that depth the chord is only
     // ~250 px. The lower two reuse the move grid's cells, so they inherit its
     // padded hit areas -- which is what made POKEMON hard to press before.
-    gfx->fillRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_BG_DAY);
-    gfx->drawRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_INK);
+    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_BG_DAY);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - (int)strlen(T(S_FIGHT)) * 6, BTL_GRID_Y + 14);
@@ -4182,16 +4212,14 @@ void renderBattle() {
     const char *low[2] = { T(S_BTL_SWITCH), T(S_BTL_RUN) };
     for (int i = 0; i < 2; i++) {
       int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, UI_TRACK);
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(low[i]) * 12) / 2, y + 14);
       gfx->print(low[i]);
     }
   } else if (btlMenu == 3) {           // "Run away?" -- YES left, NO under the old RUN spot
-    gfx->fillRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_WHITE);
-    gfx->drawRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_INK);
+    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_WHITE);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - (int)strlen(T(S_BTL_RUN_Q)) * 6, BTL_GRID_Y + 14);
@@ -4199,8 +4227,7 @@ void renderBattle() {
     const char *yn[2] = { T(S_YES), T(S_NO) };
     for (int i = 0; i < 2; i++) {
       int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, i ? UI_BAR_OK : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, i ? UI_BAR_OK : UI_TRACK);
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(yn[i]) * 12) / 2, y + 14);
@@ -4213,8 +4240,8 @@ void renderBattle() {
       int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
       const Combatant &m = (i == btlSquadAt) ? btlYou : btlSquad[i];
       bool usable = (i != btlSquadAt) && !m.fainted();
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, usable ? UI_BG_DAY : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, usable ? UI_INK : 0x8410);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, usable ? UI_BG_DAY : UI_TRACK);
+      if (!usable) gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, 0x8410);
       gfx->setTextColor(usable ? UI_INK : 0x8410);
       gfx->setTextSize(1);
       gfx->setCursor(x + 10, y + 10);
@@ -4229,8 +4256,7 @@ void renderBattle() {
     for (int i = 0; i < MOVE_SLOTS; i++) {
       int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
       uint8_t mv = btlYou.moves[i];
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, mv ? UI_BG_DAY : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, mv ? UI_BG_DAY : UI_TRACK);
       if (!mv) continue;
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(1);
