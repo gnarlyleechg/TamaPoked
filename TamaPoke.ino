@@ -5521,30 +5521,12 @@ static void chessPiece(int cx, int cy, int t, bool white) {
   chessGlyph(cx, cy, t, fill, line, true);
 }
 
-// Large buttons keep confirmation away from the small board squares.
-static constexpr int CH_CONFIRM_Y = 260;
-static constexpr int CH_CONFIRM_H = 72;
-static constexpr int CH_CONFIRM_W = 142;
-static constexpr int CH_CANCEL_X = 73;
-static constexpr int CH_MOVE_X = 251;
-
-static void renderChessConfirmation() {
-  gfx->fillRoundRect(54, 132, 358, 224, 18, UI_WHITE);
-  gfx->drawRoundRect(54, 132, 358, 224, 18, UI_INK);
-  gfx->setTextColor(UI_INK);
-  gfx->setTextSize(3);
-  gfx->setCursor(CX - 117, 153);
-  gfx->print("CONFIRM MOVE?");
-  chessPiece(147, 220, chessG.b[chessSel], true);
-  char squares[12];
-  snprintf(squares, sizeof(squares), "%c%d > %c%d",
-           'a' + chessSel % 8, 1 + chessSel / 8,
-           'a' + chessPendingTo % 8, 1 + chessPendingTo / 8);
-  gfx->setCursor(174, 208);
-  gfx->print(squares);
-  chessButton(CH_CANCEL_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "CANCEL", UI_TRACK);
-  chessButton(CH_MOVE_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "MOVE", UI_BAR_OK);
-}
+// The confirmation controls fit below the board on the round display.
+static constexpr int CH_CONFIRM_Y = CH_Y0 + 8 * CH_SQ + 4;
+static constexpr int CH_CONFIRM_H = 34;
+static constexpr int CH_CONFIRM_W = 106;
+static constexpr int CH_CANCEL_X = CX - 113;
+static constexpr int CH_MOVE_X = CX + 7;
 
 void renderChess() {
   gfx->fillScreen(RGB565_BLACK);
@@ -5564,19 +5546,28 @@ void renderChess() {
     gfx->flush();
     return;
   }
-  // the board
+  // Show the resulting position without changing the live game.
+  const bool previewing = chessPendingTo >= 0;
+  Chess preview = chessG;
+  if (previewing) preview.play(chessSel, chessPendingTo, CH_Q);
+  const Chess &shown = previewing ? preview : chessG;
   ChessMove mv[64];
-  int nmv = (chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
+  int nmv = (!previewing && chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
   bool checked = chessG.inCheck(chessG.whiteToMove);
   for (int r = 0; r < 8; r++) {
     for (int f = 0; f < 8; f++) {
       int s = r * 8 + f, x = CH_X0 + f * CH_SQ, y = CH_Y0 + (7 - r) * CH_SQ;
       uint16_t col = ((r + f) & 1) ? CH_LIGHT : CH_DARK;
       if (chessG.hasLast && (s == chessG.last.from || s == chessG.last.to)) col = CH_LAST;
-      if (s == chessSel || s == chessPendingTo) col = CH_PICK;
+      if (s == chessSel) col = CH_PICK;
+      if (s == chessPendingTo) col = UI_BAR_OK;
       gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
-      int8_t p = chessG.b[s];
-      if (checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
+      int8_t p = shown.b[s];
+      if (s == chessPendingTo) {
+        gfx->drawRect(x, y, CH_SQ, CH_SQ, UI_INK);
+        gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_WHITE);
+      }
+      if (!previewing && checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
       if (p) {
         chessPiece(x + 20, y + 20, p > 0 ? p : -p, p > 0);
       }
@@ -5599,11 +5590,15 @@ void renderChess() {
   } else if (chessRes == CHR_WHITE_WINS) snprintf(b, sizeof(b), "YOU WIN! +%u coins", chessEarned);
   else if (chessRes == CHR_BLACK_WINS) snprintf(b, sizeof(b), "I won! +%u coins", chessEarned);
   else snprintf(b, sizeof(b), "a draw! +%u coins", chessEarned);
-  gfx->setCursor(CX - (int)strlen(b) * 6, 402);
-  gfx->print(b);
-  bool sure = chessState == 1 && millis() < chessQuitUntil;
-  chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
-  if (chessPendingTo >= 0) renderChessConfirmation();
+  if (previewing) {
+    chessButton(CH_CANCEL_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "CANCEL", UI_TRACK);
+    chessButton(CH_MOVE_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "MOVE", UI_BAR_OK);
+  } else {
+    gfx->setCursor(CX - (int)strlen(b) * 6, 402);
+    gfx->print(b);
+    bool sure = chessState == 1 && millis() < chessQuitUntil;
+    chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
+  }
   gfx->flush();
 }
 
