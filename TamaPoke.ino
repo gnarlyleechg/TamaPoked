@@ -893,7 +893,9 @@ void loop() {
   actStep(now);
   audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
 
-  updateBrightness(now);
+  // Touch handling can set lastInteract after the loop's initial timestamp.
+  // Use a fresh timestamp so idle time cannot underflow and dim the display.
+  updateBrightness(millis());
 
   // vuelca el autoguardado periodico SOLO con la pantalla atenuada/apagada o
   // durmiendo: la escritura a NVS congela ~1s ambos cores (caché de flash off),
