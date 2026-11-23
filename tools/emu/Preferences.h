@@ -42,9 +42,10 @@ public:
   int16_t getShort(const char *k, int16_t d = 0) { return getT(k, d); }
   void putUShort(const char *k, uint16_t v) { putT(k, v); }
   uint16_t getUShort(const char *k, uint16_t d = 0) { return getT(k, d); }
-  void putBytes(const char *k, const void *p, size_t n) {
+  size_t putBytes(const char *k, const void *p, size_t n) {
     const uint8_t *b = (const uint8_t *)p;
     kv[k] = std::vector<uint8_t>(b, b + n);
+    return n;
   }
   // Size of a stored blob, 0 if absent. The firmware uses it to tell an
   // old, shorter record layout from the current one (see Party::begin).
