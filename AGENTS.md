@@ -1,5 +1,7 @@
 # TamaPoke kids-version — ChatGPT and Codex engineering entrypoint
 
+**Codex Goal for the current engineering milestone:** read `GOAL.md` and activate its specific `/goal` command in an actual supported Codex thread. This source file is a draft definition until Codex reports it active; a short status message or completed subtask is not completion. Continue safe unblocked digital work, and preserve all owner-only safety and budget gates. Canonical standard: private Workshop `docs/CODEX_GOAL_STANDARD.md` (when accessible).
+
 This public repository's active children-oriented firmware development is on **`kids-version`**, not `main`. This is a continuation of the existing project, **not** a redesign or new fork. Use a topic branch and a reviewable pull request before changing source.
 
 ## First read
