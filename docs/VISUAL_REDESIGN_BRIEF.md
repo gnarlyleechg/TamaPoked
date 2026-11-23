@@ -1,6 +1,6 @@
 # TamaPoke visual redesign brief
 
-**State:** visual direction approved; art implementation has not started.
+**State:** visual direction approved; the home-screen background slice is implemented on the pilot branch.
 **Scope:** visual presentation only. Keep the current game, save format, species data,
 controls, installer and licensed sprite pipeline working.
 
@@ -49,6 +49,16 @@ Pokédex screens. This does not select or replace Asher's saved Pokémon.
   display size, with the circle edge, bottom controls, text and touch areas
   checked for clipping and legibility.
 
+## First implementation slice
+
+The home screen now uses the approved day/night living-room illustrations, with
+the existing canonical species sprite and all current home controls left intact.
+Source art stays at 233 x 156 and is packed into indexed RGB565 firmware data.
+The renderer expands it once into a PSRAM cache and falls back to the previous
+procedural scene if that allocation fails. The 466 x 466 host-emulator preview is
+`docs/previews/home-room-bulbasaur-emulator.png`. This is emulator evidence only;
+board rendering, memory headroom and frame timing are not yet verified.
+
 ## Pilot completion evidence
 
 1. Preview a single real species across home day/night, battle and Pokédex using
@@ -71,9 +81,8 @@ replace every screen in one unreviewable change.
 
 ## Current blocker and next action
 
-The approved concept uses a richer creature render than the licensed PMD sprite
-art currently in the game. A new Pokémon artwork set must preserve the exact
-canonical designs and have a compatible, traceable source. Until that source is
-identified, the pilot can improve backgrounds and UI while using the existing
-Pokémon art; it cannot honestly claim that the Pokémon themselves have been
-redesigned to match the concept.
+The new background slice does not redesign Pokémon sprites. The project continues
+to use the existing licensed PMD sprite pack. A richer canonical creature art
+set still needs a traceable source that preserves exact species identity. The
+next safe slice is the battle scene treatment around existing sprites, without
+changing battle logic or claiming new creature artwork.

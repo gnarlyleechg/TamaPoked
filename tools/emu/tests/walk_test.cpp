@@ -21,7 +21,7 @@ extern Pet pet; extern Party party;
 extern bool menuOpen, cardOpen, galleryOpen, gymOpen, partyOpen, shopOpen, chessOpen, actOpen, clockOpen, gymPick, galleryPick;
 extern uint8_t actState, fishPhase, treasurePick, treasureLoot[3], penShots, penGoals, penPhase;
 extern uint32_t fishBiteAt; extern int16_t tY0, penKickX;
-extern uint8_t chessState; extern int8_t chessSel; extern bool chessAiDue;
+extern uint8_t chessState; extern int8_t chessSel, chessPendingTo; extern bool chessAiDue;
 struct Chess { int8_t b[64]; }; extern Chess chessG;
 extern char actMsg[34];
 static int bad = 0;
@@ -118,7 +118,16 @@ int main() {
   closeAll(); chessOpen = true; extern uint8_t chessState; chessState = 0; renderOk("chess level list");
   onTap(233, 146); CK(chessState == 1, "chess EASY starts a game"); renderOk("chess board");
   onTap(253, 338); CK(chessSel == 12, "tapping the e2 pawn picks it up");
-  onTap(253, 258); CK(chessG.b[28] > 0 && chessG.b[12] == 0, "tapping e4 plays the move");
+  onTap(253, 258);
+  CK(chessPendingTo == 28 && chessG.b[12] > 0 && chessG.b[28] == 0,
+     "tapping e4 previews the move without changing the board");
+  onTap(173, 419);
+  CK(chessPendingTo == -1 && chessSel == 12 && chessG.b[12] > 0,
+     "CANCEL clears the preview and keeps e2 selected");
+  onTap(253, 258); CK(chessPendingTo == 28, "e4 can be previewed again");
+  onTap(293, 419);
+  CK(chessPendingTo == -1 && chessG.b[28] > 0 && chessG.b[12] == 0,
+     "MOVE commits the confirmed e4 move");
   CK(chessAiDue, "the board answers next");
   chessAiStep(millis() + 5000); CK(!chessAiDue, "the board makes its move");
   int blackMoved = 0; for (int s = 0; s < 64; s++) if (chessG.b[s] < 0) blackMoved++;

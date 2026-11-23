@@ -23,6 +23,7 @@
 #include "link.h"
 #include "linknow.h"
 #include "backs.h"
+#include "home_backs.h"
 #include "badges.h"
 #include "avatars.h"
 #include <stdarg.h>
@@ -2184,7 +2185,50 @@ void drawClouds(uint32_t now, uint16_t col) {
   }
 }
 
+// The approved TamaPup room art is a palette-indexed 233x156 image. Expand it
+// once per day/night change into PSRAM; each frame then copies one RGB565 image
+// to the canvas instead of issuing tens of thousands of individual draw calls.
+bool drawHomeRoom(bool night) {
+  static uint16_t *roomCache = nullptr;
+  static bool cacheNight = false;
+  static bool cacheValid = false;
+  if (!roomCache) roomCache = (uint16_t *)ps_malloc(466 * 466 * sizeof(uint16_t));
+  if (!roomCache) return false;
+
+  const uint8_t *pixels = night ? ROOM_NIGHT_PIXELS : ROOM_DAY_PIXELS;
+  const uint16_t *palette = night ? ROOM_NIGHT_PALETTE : ROOM_DAY_PALETTE;
+  const uint8_t floorIndex = pgm_read_byte(pixels + 120 * ROOM_ART_W + ROOM_ART_W / 2);
+  const uint16_t floorColor = pgm_read_word(palette + floorIndex);
+
+  if (!cacheValid || cacheNight != night) {
+    for (int y = 0; y < 466; y++) {
+      const int dy = y - CY;
+      for (int x = 0; x < 466; x++) {
+        const int dx = x - CX;
+        uint16_t color = 0;
+        if (dx * dx + dy * dy <= 231 * 231) {
+          if (y < ROOM_ART_H * 2) {
+            const uint32_t at = (uint32_t)(y / 2) * ROOM_ART_W + x / 2;
+            color = pgm_read_word(palette + pgm_read_byte(pixels + at));
+          } else {
+            color = floorColor;
+          }
+        }
+        roomCache[y * 466 + x] = color;
+      }
+    }
+    cacheNight = night;
+    cacheValid = true;
+  }
+  gfx->draw16bitRGBBitmap(0, 0, roomCache, 466, 466);
+  return true;
+}
+
 void drawScene(uint8_t biome, uint32_t now, bool night) {
+  // The home screen now uses the owner's approved day/night living-room art.
+  // Other game scenes keep their existing backgrounds and rendering paths.
+  if (drawHomeRoom(night)) return;
+
   int h = sceneHour();
   uint16_t top, bot;
   if (night)            { top = C565(0x0c, 0x12, 0x24); bot = C565(0x1e, 0x26, 0x46); }

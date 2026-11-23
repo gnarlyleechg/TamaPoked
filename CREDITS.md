@@ -35,6 +35,13 @@ credit is in the original repository's
 [tracker.json](https://github.com/PMDCollab/SpriteCollab/blob/master/tracker.json).
 Huge thanks to that whole community for an enormous amount of work.
 
+## Home room backgrounds
+
+`tools/home_art/day.png` and `tools/home_art/night.png` are the living-room
+background illustrations previously created for TamaPup and reused here at the
+owner's request. `tools/pack_home_art.py` converts them to the indexed RGB565
+data in `home_backs.h`; the Pokémon sprites and game data are unchanged.
+
 > **Important if you reuse this repo:** the packaged sprite files
 > (`tools/sdcard/mons/*.bin`) are derived from the sources above. Don't
 > redistribute them commercially. If you publish the project, the clean approach
