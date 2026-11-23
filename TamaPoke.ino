@@ -219,6 +219,7 @@ Chess chessG;
 uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
 uint8_t chessLevel = 1;       // 1 easy, 2 medium, 3 hard
 int8_t chessSel = -1;
+int8_t chessPendingTo = -1;
 bool chessAiDue = false;
 uint32_t chessAiAt = 0, chessQuitUntil = 0;
 uint8_t chessEarned = 0;
@@ -5520,6 +5521,31 @@ static void chessPiece(int cx, int cy, int t, bool white) {
   chessGlyph(cx, cy, t, fill, line, true);
 }
 
+// Large buttons keep confirmation away from the small board squares.
+static constexpr int CH_CONFIRM_Y = 260;
+static constexpr int CH_CONFIRM_H = 72;
+static constexpr int CH_CONFIRM_W = 142;
+static constexpr int CH_CANCEL_X = 73;
+static constexpr int CH_MOVE_X = 251;
+
+static void renderChessConfirmation() {
+  gfx->fillRoundRect(54, 132, 358, 224, 18, UI_WHITE);
+  gfx->drawRoundRect(54, 132, 358, 224, 18, UI_INK);
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(3);
+  gfx->setCursor(CX - 117, 153);
+  gfx->print("CONFIRM MOVE?");
+  chessPiece(147, 220, chessG.b[chessSel], true);
+  char squares[12];
+  snprintf(squares, sizeof(squares), "%c%d > %c%d",
+           'a' + chessSel % 8, 1 + chessSel / 8,
+           'a' + chessPendingTo % 8, 1 + chessPendingTo / 8);
+  gfx->setCursor(174, 208);
+  gfx->print(squares);
+  chessButton(CH_CANCEL_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "CANCEL", UI_TRACK);
+  chessButton(CH_MOVE_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "MOVE", UI_BAR_OK);
+}
+
 void renderChess() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -5547,7 +5573,7 @@ void renderChess() {
       int s = r * 8 + f, x = CH_X0 + f * CH_SQ, y = CH_Y0 + (7 - r) * CH_SQ;
       uint16_t col = ((r + f) & 1) ? CH_LIGHT : CH_DARK;
       if (chessG.hasLast && (s == chessG.last.from || s == chessG.last.to)) col = CH_LAST;
-      if (s == chessSel) col = CH_PICK;
+      if (s == chessSel || s == chessPendingTo) col = CH_PICK;
       gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
       int8_t p = chessG.b[s];
       if (checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
@@ -5577,6 +5603,7 @@ void renderChess() {
   gfx->print(b);
   bool sure = chessState == 1 && millis() < chessQuitUntil;
   chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
+  if (chessPendingTo >= 0) renderChessConfirmation();
   gfx->flush();
 }
 
@@ -5602,6 +5629,25 @@ void chessAiStep(uint32_t now) {
 }
 
 void chessTap(int16_t x, int16_t y) {
+  if (chessPendingTo >= 0) {
+    if (y < CH_CONFIRM_Y || y >= CH_CONFIRM_Y + CH_CONFIRM_H) return;
+    if (x >= CH_CANCEL_X && x < CH_CANCEL_X + CH_CONFIRM_W) {
+      chessPendingTo = -1;  // Keep the piece selected for another try.
+      sfxPlay(SFX_TAP);
+    } else if (x >= CH_MOVE_X && x < CH_MOVE_X + CH_CONFIRM_W) {
+      const int to = chessPendingTo;
+      chessPendingTo = -1;
+      if (!chessG.play(chessSel, to, CH_Q)) {
+        sfxPlay(SFX_DENY);
+        return;
+      }
+      chessSel = -1;
+      sfxPlay(SFX_TAP);
+      chessFinish();
+      if (chessState == 1) { chessAiDue = true; chessAiAt = millis() + 250; }
+    }
+    return;
+  }
   bool onBack = (x >= CH_BACK_X - 10 && x <= CH_BACK_X + CH_BACK_W + 10 && y >= (chessState == 0 ? 340 : CH_BACK_Y) - 6 &&
                  y <= (chessState == 0 ? 384 : CH_BACK_Y + CH_BACK_H + 8));
   if (chessState == 0) {
@@ -5611,7 +5657,7 @@ void chessTap(int16_t x, int16_t y) {
       if (x >= CX - 90 && x <= CX + 90 && y >= by && y <= by + 52) {
         chessLevel = (uint8_t)(i + 1);
         chessG.reset();
-        chessState = 1; chessSel = -1; chessAiDue = false; chessQuitUntil = 0;
+        chessState = 1; chessSel = -1; chessPendingTo = -1; chessAiDue = false; chessQuitUntil = 0;
         sfxPlay(SFX_TAP);
         return;
       }
@@ -5639,12 +5685,16 @@ void chessTap(int16_t x, int16_t y) {
     sfxPlay(SFX_TAP);
     return;
   }
-  if (chessSel >= 0 && chessG.play(chessSel, s, CH_Q)) {
-    chessSel = -1;
-    sfxPlay(SFX_TAP);
-    chessFinish();
-    if (chessState == 1) { chessAiDue = true; chessAiAt = millis() + 250; }
-    return;
+  if (chessSel >= 0) {
+    ChessMove moves[64];
+    const int count = chessG.movesFrom(chessSel, moves);
+    for (int i = 0; i < count; ++i) {
+      if (moves[i].to == s) {
+        chessPendingTo = s;
+        sfxPlay(SFX_TAP);
+        return;
+      }
+    }
   }
   if (chessSel >= 0) sfxPlay(SFX_DENY);     // not a legal square for that piece
   chessSel = -1;
