@@ -36,6 +36,7 @@
 #include "rtcbat.h"
 #include "i18n.h"
 #include "audio.h"
+#include "touchcal.h"
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
@@ -158,6 +159,10 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+static TouchCalibration touchCalibration;
+static CalTouchPoint touchSamples[5];
+static bool touchCalOpen = false, touchCalRetry = false;
+static uint8_t touchCalStep = 0;
 void drawSideButtons();
 bool sideButtonTap(int16_t x, int16_t y);
 void renderAct();
@@ -703,6 +708,9 @@ void setup() {
     if (bp.begin("tkids", true)) {
       uint8_t b = bp.getUChar("bright", 4);
       gBrightLvl = (b >= 1 && b <= 5) ? b : 4;
+      TouchCalibration saved;
+      if (bp.getBytes("touchcal", &saved, sizeof(saved)) == sizeof(saved) && saved.valid())
+        touchCalibration = saved;
       bp.end();
     }
   }
@@ -864,6 +872,9 @@ void loop() {
       if (screenOff || dimStage > 0) {
         lastInteract = now;               // a dark panel: the press just wakes it
         if (screenOff) { screenOff = false; pet.setScreenOff(false); }
+      } else if (touchCalOpen) {
+        touchCalOpen = false;
+        swallowGesture = true;
       } else if (clockOpen) {
         clockOpen = false;
       } else if (uiCurrentScreen() == SCR_MAIN) {
@@ -1246,6 +1257,11 @@ void handleTouch() {
   gTouchIrq = false;
   int16_t x, y;
   bool pressed = touch.getPoint(&x, &y, 1) > 0;
+  if (pressed && !touchCalOpen) {
+    const CalTouchPoint corrected = touchCalibration.correct({x, y});
+    x = corrected.x;
+    y = corrected.y;
+  }
 
   // saco de entrenamiento: cada toque cuenta al instante (aporrear rapido)
   if (sackOpen) {
@@ -1762,6 +1778,32 @@ void onSwipe(int dir) {
 }
 
 void onTap(int16_t x, int16_t y) {
+  if (touchCalOpen) {
+    const CalTouchPoint target = TOUCH_TARGETS[touchCalStep];
+    int dx = x - target.x, dy = y - target.y;
+    if (dx * dx + dy * dy > 80 * 80) return;
+    touchSamples[touchCalStep++] = {x, y};
+    if (touchCalStep == 5) {
+      TouchCalibration calibrated;
+      if (calibrated.fit(touchSamples)) {
+        Preferences prefs;
+        if (prefs.begin("tkids", false)) {
+          const bool saved = prefs.putBytes("touchcal", &calibrated, sizeof(calibrated)) == sizeof(calibrated);
+          prefs.end();
+          if (saved) {
+            touchCalibration = calibrated;
+            touchCalOpen = false;
+            sfxPlay(SFX_TAP);
+            return;
+          }
+        }
+      }
+      touchCalStep = 0;
+      touchCalRetry = true;
+    }
+    sfxPlay(SFX_TAP);
+    return;
+  }
   if (pet.awaitingStarter()) {  // primera partida: region y luego inicial
     if (!starterRegionDone) {
       int r = regionPickTap(x, y, RPICK_FOR_START);
@@ -2959,6 +3001,24 @@ void drawClockBtn(int x, int y, const char *l) {
 static const char *const LANG_CODES[LANG_COUNT] = { "ES", "EN", "FR", "DE", "IT", "PT" };
 
 void renderClock() {
+  if (touchCalOpen) {
+    gfx->fillScreen(RGB565_BLACK);
+    gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
+    const CalTouchPoint target = TOUCH_TARGETS[touchCalStep];
+    gfx->setTextColor(UI_INK);
+    gfx->setTextSize(2);
+    gfx->setCursor(119, 132);
+    gfx->print(touchCalRetry ? "TRY THE DOTS AGAIN" : "TAP THE DOT CENTER");
+    gfx->setCursor(215, 158);
+    gfx->printf("%u/5", (unsigned)touchCalStep + 1);
+    gfx->setCursor(149, 300);
+    gfx->print("BOOT TO CANCEL");
+    gfx->fillCircle(target.x, target.y, 19, UI_INK);
+    gfx->fillCircle(target.x, target.y, 15, UI_BAR_OK);
+    gfx->fillCircle(target.x, target.y, 4, UI_INK);
+    gfx->flush();
+    return;
+  }
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
   gfx->setTextColor(UI_INK);
@@ -3047,10 +3107,16 @@ void renderClock() {
     }
   }
 
-  gfx->fillRoundRect(133, 340, 200, 48, 14, UI_BAR_OK);
+  gfx->fillRoundRect(92, 340, 176, 48, 14, UI_WHITE);
+  gfx->drawRoundRect(92, 340, 176, 48, 14, UI_INK);
+  gfx->setTextSize(2);
+  gfx->setTextColor(UI_INK);
+  gfx->setCursor(120, 356);
+  gfx->print("CALIBRATE");
+  gfx->fillRoundRect(278, 340, 96, 48, 14, UI_BAR_OK);
   gfx->setTextColor(UI_BG_DAY);
   gfx->setTextSize(3);
-  gfx->setCursor(CX - 18, 352);
+  gfx->setCursor(308, 352);
   gfx->print("OK");
 
   gfx->setTextColor(UI_TRACK);
@@ -3099,7 +3165,15 @@ void clockTap(int16_t x, int16_t y) {
       return;
     }
   }
-  if (y >= 340 && y <= 388 && x >= 133 && x <= 333) { applyClock(); return; }
+  if (y >= 340 && y <= 388) {
+    if (x >= 92 && x <= 268) {
+      touchCalStep = 0;
+      touchCalRetry = false;
+      touchCalOpen = true;
+    } else if (x >= 278 && x <= 374) {
+      applyClock();
+    }
+  }
 }
 
 // llama + numero de racha arriba a la izquierda
