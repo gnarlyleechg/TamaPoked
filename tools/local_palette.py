@@ -16,17 +16,19 @@ def allocate(old,new,old_data,new_data):
         return [min(range(len(pal)),key=lambda i:sum((a-b)**2 for a,b in zip(rgb(c),rgb(pal[i])))) for c in src]
     return pal,mapping(old),mapping(new)
 
-def merge_local(original,pilot):
+def merge_local(original,pilot,replace=(1,2)):
     import struct
     from merge_walk_pilot import read
     old,acts=read(original); new,walk=read(pilot)
-    retained={k:v for k,v in acts.items() if k not in (1,2)}
-    pal,om,nm=allocate(old,new,[v[4] for v in retained.values()],[walk[k][4] for k in (1,2)])
-    out=bytearray(b"TPK2"+struct.pack("<BH",len(retained)+2,len(pal)))
+    replace=set(replace)
+    if not replace or not replace <= set(walk): raise ValueError('missing replacement action')
+    retained={k:v for k,v in acts.items() if k not in replace}
+    pal,om,nm=allocate(old,new,[v[4] for v in retained.values()],[walk[k][4] for k in sorted(replace)])
+    out=bytearray(b"TPK2"+struct.pack("<BH",len(retained)+len(replace),len(pal)))
     out.extend(struct.pack("<"+"H"*len(pal),*pal))
-    for k,v in sorted({**retained,1:walk[1],2:walk[2]}.items()):
+    for k,v in sorted({**retained,**{k:walk[k] for k in replace}}.items()):
         w,h,n,ms,data=v
-        m=nm if k in (1,2) else om
+        m=nm if k in replace else om
         out.extend(struct.pack("<4B",k,w,h,n)+ms+bytes(255 if x==255 else m[x] for x in data))
     return bytes(out)
 
