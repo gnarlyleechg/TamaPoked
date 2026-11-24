@@ -17,12 +17,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender-4.2.0-linux-x64
+          key: blender-official-4.2.0-linux-x64-v1
       - name: Install Blender
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pil libgl1 libxi6 libxrender1 libxxf86vm1
-          curl --fail --location --retry 3 https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
-          tar -xf "$RUNNER_TEMP/blender.tar.xz" -C "$RUNNER_TEMP"
+          if [ ! -x "$RUNNER_TEMP/blender-4.2.0-linux-x64/blender" ]; then
+            curl --fail --location --retry 3 --retry-all-errors https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
+            tar -xf "$RUNNER_TEMP/blender.tar.xz" -C "$RUNNER_TEMP"
+          fi
           echo "$RUNNER_TEMP/blender-4.2.0-linux-x64" >> "$GITHUB_PATH"
       - name: Verify bundled Python and Draco
         run: blender -b --python-exit-code 1 --python-expr 'import numpy; from io_scene_gltf2.io.com import gltf2_io_draco_compression_extension as d; assert d.dll_exists(); print(numpy.__version__)'
