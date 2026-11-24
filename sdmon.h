@@ -2,6 +2,8 @@
 #include <Arduino.h>
 #include "dex.h"
 #include "noart.h"
+#include "portrait.h"
+#include <stdlib.h>
 
 // Sprite animado TPK1 (formato heredado, camino de respaldo). El proyecto usa
 // PMD/TPK2 (PmdMon) para todo; esta ruta queda inactiva si no hay NNN.bin en la SD.
@@ -48,6 +50,14 @@ struct PmdMon {
   bool load(int16_t dexNum, bool shiny = false);
   void unload();
   bool has(uint8_t a) const { return loaded && a < PMD_NACTS && acts[a].frames > 0; }
+};
+
+// Optional detailed canonical portrait, loaded only for a known gallery entry.
+struct SdPortrait {
+  PortraitView view;
+  uint8_t *blob = nullptr;
+  void unload() { view = PortraitView(); free(blob); blob = nullptr; }
+  bool load(int16_t dexNum, bool shiny);
 };
 
 // miniaturas de la galeria (thumbs.bin entero en PSRAM)
