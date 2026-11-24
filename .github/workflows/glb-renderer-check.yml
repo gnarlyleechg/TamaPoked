@@ -6,6 +6,8 @@ on:
       - 'tools/render_glb_walk.py'
       - 'tools/import_local_glb.py'
       - 'tools/merge_walk_pilot.py'
+      - 'tools/local_palette.py'
+      - 'tools/test_local_palette.py'
       - 'tools/make_renderer_fixture.py'
       - '.github/workflows/glb-renderer-check.yml'
 permissions:
@@ -21,12 +23,14 @@ jobs:
         with:
           path: ${{ runner.temp }}/blender-4.2.0-linux-x64
           key: blender-official-4.2.0-linux-x64-v1
+      - name: Independent palette tests
+        run: python -m pip install Pillow && python tools/test_local_palette.py
       - name: Install Blender
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pil libgl1 libxi6 libxrender1 libxxf86vm1
           if [ ! -x "$RUNNER_TEMP/blender-4.2.0-linux-x64/blender" ]; then
-            curl --fail --location --retry 3 --retry-all-errors https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
+            curl --fail --location --retry 2 --retry-all-errors https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz" || curl --fail --location --retry 2 https://mirrors.ocf.berkeley.edu/blender/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
             tar -xf "$RUNNER_TEMP/blender.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/blender-4.2.0-linux-x64" >> "$GITHUB_PATH"
