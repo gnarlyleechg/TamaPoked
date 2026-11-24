@@ -86,8 +86,9 @@ jobs:
           rm -f "$ROOT"/tools/sdcard/mons/*.tpa "$ROOT"/tools/sdcard/mons/portrait-manifest.json
           cd "$ROOT"
           rm -rf "$RUNNER_TEMP/portrait-pilot"
-      - name: Bake original articulated Bulbasaur pilot
-        if: github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'
+      # Rejected geometric artwork retained only as a historical engineering fixture.
+      - name: Bake rejected historical animation fixture (manual only)
+        if: github.event_name == 'workflow_dispatch' && false
         run: |
           "$RUNNER_TEMP/portrait-venv/bin/python" tools/bulbasaur_walk_pilot.py "$RUNNER_TEMP/battle-shots/bulbasaur"
           test -s "$RUNNER_TEMP/battle-shots/bulbasaur/bulbasaur-pilot.tpk2"
