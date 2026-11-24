@@ -24,6 +24,7 @@
 #include "linknow.h"
 #include "backs.h"
 #include "home_backs.h"
+#include "fishing_back.h"
 #include "sprite_runs.h"
 #include "sprite_fit.h"
 #include "badges.h"
@@ -3263,7 +3264,8 @@ void drawCelebration() {
     l1 = T(S_GREAT);
     l2 = buf;
   }
-  if (!l1) return;
+  // A new hatch clears the medal ID while a previous banner can still be timed.
+  if (!l1 || !l2) return;
   gfx->fillRoundRect(73, 150, 320, 96, 16, UI_BAR_WARN);
   gfx->drawRoundRect(73, 150, 320, 96, 16, UI_INK);
   gfx->setTextColor(UI_INK);
@@ -5693,7 +5695,8 @@ static void chessGlyph(int cx, int cy, int t, uint16_t c, uint16_t det, bool det
   }
 }
 static void chessPiece(int cx, int cy, int t, bool white) {
-  uint16_t fill = white ? 0xFFFF : 0x2104, line = white ? 0x2104 : 0xC618;
+  uint16_t fill = white ? C565(255, 247, 223) : C565(35, 43, 48);
+  uint16_t line = white ? UI_INK : C565(229, 214, 181);
   static const int8_t OFF[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
   for (int i = 0; i < 8; i++) chessGlyph(cx + OFF[i][0], cy + OFF[i][1], t, line, line, false);
   chessGlyph(cx, cy, t, fill, line, true);
@@ -5732,6 +5735,8 @@ void renderChess() {
   ChessMove mv[64];
   int nmv = (!previewing && chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
   bool checked = chessG.inCheck(chessG.whiteToMove);
+  constexpr int side = 8 * CH_SQ;
+  gfx->drawRect(CH_X0 - 2, CH_Y0 - 2, side + 4, side + 4, UI_INK);
   for (int r = 0; r < 8; r++) {
     for (int f = 0; f < 8; f++) {
       int s = r * 8 + f, x = CH_X0 + f * CH_SQ, y = CH_Y0 + (7 - r) * CH_SQ;
@@ -5740,6 +5745,8 @@ void renderChess() {
       if (s == chessSel) col = CH_PICK;
       if (s == chessPendingTo) col = UI_BAR_OK;
       gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
+      gfx->drawFastHLine(x, y, CH_SQ, lerp565(col, UI_WHITE, 1, 5));
+      gfx->drawFastHLine(x, y + CH_SQ - 1, CH_SQ, lerp565(col, UI_INK, 1, 5));
       int8_t p = shown.b[s];
       if (s == chessPendingTo) {
         gfx->drawRect(x, y, CH_SQ, CH_SQ, UI_INK);
@@ -5753,7 +5760,8 @@ void renderChess() {
   }
   for (int i = 0; i < nmv; i++) {     // where the chosen piece can go
     int x = CH_X0 + (mv[i].to % 8) * CH_SQ, y = CH_Y0 + (7 - mv[i].to / 8) * CH_SQ;
-    gfx->fillCircle(x + 20, y + 20, 6, CH_PICK);
+    gfx->drawCircle(x + 20, y + 20, 7, UI_INK);
+    if (!shown.b[mv[i].to]) gfx->fillCircle(x + 20, y + 20, 5, CH_PICK);
   }
   // header and status
   gfx->setTextColor(UI_INK);
@@ -5909,93 +5917,40 @@ static void fishLine(int x0, int y0, int x1, int y1, int sag) {   // a drooping 
     px = x; py = y;
   }
 }
+static void drawFishingBackdrop(int left, int top) {
+  // Expand two identical scanlines at a time. Keep the static art in flash
+  // and leave PSRAM available for the canvas, living room and loaded sprites.
+  constexpr int width = FISH_ART_W * 2;
+  uint16_t rows[width * 2];
+  for (int y = 0; y < FISH_ART_H; ++y) {
+    for (int x = 0; x < FISH_ART_W; ++x) {
+      uint8_t index = pgm_read_byte(FISH_ART_PIXELS + y * FISH_ART_W + x);
+      uint16_t color = pgm_read_word(FISH_ART_PALETTE + index);
+      int leftPixel = x * 2;
+      rows[leftPixel] = rows[leftPixel + 1] = color;
+    }
+    memcpy(rows + width, rows, width * sizeof(uint16_t));
+    gfx->draw16bitRGBBitmap(left, top + y * 2, rows, width, 2);
+  }
+}
+
+static void drawFishingRipple(int x, int y, int radius, uint16_t color) {
+  // Flatten the ring to follow the perspective of the lake surface.
+  int height = radius / 4;
+  gfx->drawLine(x - radius, y, x - radius * 2 / 3, y - height, color);
+  gfx->drawFastHLine(x - radius * 2 / 3, y - height, radius * 4 / 3 + 1, color);
+  gfx->drawLine(x + radius * 2 / 3, y - height, x + radius, y, color);
+  gfx->drawLine(x - radius, y, x - radius * 2 / 3, y + height, color);
+  gfx->drawFastHLine(x - radius * 2 / 3, y + height, radius * 4 / 3 + 1, color);
+  gfx->drawLine(x + radius * 2 / 3, y + height, x + radius, y, color);
+}
+
 static void drawFishScene() {
-  const int L = 40, T = 108, W = 386, H = 250;     // the window
+  const int L = 40, T = 108;
   const int WATER_Y = 262;
   uint32_t now = millis();
-  // Original, lightweight park-inspired scenery: distant I-210 bridge,
-  // wooded shoreline and sunset reflected on Prien Lake. This is an artistic
-  // interpretation, not a survey or photo of a specific fishing platform.
-  const uint16_t skyTop = C565(102, 157, 189), skyLow = C565(253, 207, 152);
-  const uint16_t waterFar = C565(108, 153, 160), waterNear = C565(37, 89, 112);
-  gfx->fillRoundRect(L, T, W, H, 14, skyTop);
-  for (int y = T + 14; y < WATER_Y; y += 7) {
-    const int h = WATER_Y - y < 7 ? WATER_Y - y : 7;
-    gfx->fillRect(L + 1, y, W - 2, h, lerp565(skyTop, skyLow, y - T, WATER_Y - T));
-  }
-  gfx->fillCircle(331, 167, 25, C565(250, 224, 169));
-  gfx->fillCircle(331, 167, 18, C565(255, 241, 186));
-  for (int i = 0; i < 6; ++i) {
-    const int x = L + 32 + i * 58;
-    gfx->fillRoundRect(x, T + 36 + (i % 3) * 14, 42 + (i % 2) * 21, 4, 2, C565(220, 221, 211));
-  }
-  const uint16_t distant = C565(84, 114, 115);
-  gfx->fillRect(L + 1, WATER_Y - 12, W - 2, 12, distant);
-  for (int i = 0; i < 22; ++i) {
-    const int x = L + 8 + i * 17;
-    const int r = 8 + (i * 7) % 10;
-    gfx->fillCircle(x, WATER_Y - 13 - (i % 3) * 3, r, distant);
-  }
-  // Layered foliage and atmospheric depth; deterministic, no gameplay RNG.
-  for (int i = 0; i < 38; ++i) {
-    int x = L + 12 + (i * 47) % (W - 24);
-    int y = WATER_Y - 18 - (i * 11) % 17;
-    int r = 4 + (i * 3) % 7;
-    gfx->fillCircle(x, y, r, C565(69 + i % 19, 103 + i % 23, 91 + i % 13));
-    gfx->fillCircle(x - 2, y - 2, r / 2, C565(106, 137, 112));
-  }
-  // Stylized high bridge silhouette on the far side of the lake.
-  const uint16_t bridge = C565(70, 88, 91);
-  gfx->drawLine(174, 243, 240, 220, bridge);
-  gfx->fillRect(240, 219, 78, 4, bridge);
-  gfx->drawLine(317, 220, 412, 243, bridge);
-  gfx->drawLine(174, 246, 240, 223, bridge);
-  gfx->drawLine(317, 223, 412, 246, bridge);
-  for (int i = 0; i < 5; ++i) {
-    int x = 192 + 49 * i;
-    int y = x < 240 ? 244 - (x - 174) * 23 / 66 :
-            x < 318 ? 221 : 221 + (x - 318) * 23 / 94;
-    gfx->fillRect(x, y, 3, WATER_Y - y, bridge);
-  }
-  // Foreground shade trees frame the shoreline, away from the hook target.
-  gfx->fillRect(L + 17, T + 46, 7, WATER_Y - T - 46, C565(85, 80, 57));
-  for (int i = 0; i < 7; ++i)
-    gfx->fillCircle(L + 17 + i * 12, T + 45 + (i % 3) * 9, 15, C565(62, 100 + (i % 3) * 10, 73));
-  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, waterNear);
-  for (int y = WATER_Y; y < T + H - 14; y += 6) {
-    const int h = T + H - 14 - y < 6 ? T + H - 14 - y : 6;
-    gfx->fillRect(L + 1, y, W - 2, h, lerp565(waterFar, waterNear, y - WATER_Y, H - (WATER_Y - T)));
-  }
-  // Deterministic moving reflections, no game RNG consumed by rendering.
-  for (int i = 0; i < 23; ++i) {
-    const int wy = WATER_Y + 5 + (i * 13) % 75;
-    const int wx = L + 155 + (i * 41 + (int)(now / 150 % 15)) % 190;
-    const int len = 6 + (i * 9) % 22;
-    gfx->drawFastHLine(wx, wy, len, lerp565(waterFar, skyLow, i % 4, 5));
-  }
-  for (int i = 0; i < 9; ++i) {
-    int len = 10 + (i * 13) % 40;
-    gfx->drawFastHLine(331 - len / 2, WATER_Y + 4 + i * 6, len, C565(205, 184, 141));
-  }
-  // Fine water ripples and broken reflected shoreline.
-  for (int i = 0; i < 52; ++i) {
-    int y = WATER_Y + 3 + (i * 19) % 77;
-    int x = L + 12 + (i * 53 + now / 240 % 7) % (W - 44);
-    int len = 3 + (i * 7) % 23;
-    gfx->drawFastHLine(x, y, len, lerp565(waterNear, waterFar, 2 + i % 5, 8));
-  }
-  // Keep the original dock/platform footprint and creature/rod coordinates.
-  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(153, 122, 87));
-  gfx->fillRect(L, WATER_Y - 2, 150, 2, C565(212, 178, 131));
-  gfx->fillRect(L, WATER_Y + 7, 150, 3, C565(86, 70, 53));
-  for (int i = 0; i < 5; ++i) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y, 7, C565(105, 82, 58));
-  for (int i = 0; i < 12; ++i) {
-    int x = L + 5 + i * 12;
-    gfx->drawFastHLine(x, WATER_Y + 3 + i % 3, 8, C565(124, 95, 65));
-  }
-  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(86, 70, 53));
-  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(86, 70, 53));
-  gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
+  drawFishingBackdrop(L, T);
+  gfx->drawRect(L, T, FISH_ART_W * 2, FISH_ART_H * 2, UI_INK);
 
   int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
   if (pmd.loaded) drawPmdAct(PMD_IDLE, petX, ground, now, true, false, 3);
@@ -6028,11 +5983,15 @@ static void drawFishScene() {
     int dip = (fishPhase == 2) ? 12 : (((now / 450) & 1) ? 1 : 0);
     if (fishPhase == 4) dip = -4;
     fishLine(tipX, tipY, bx, by - 6 + dip, fishPhase == 4 ? 14 : 6);
-    gfx->drawCircle(bx, by + 8, 14 + (int)((now / 90) % 8), C565(150, 200, 240));   // ripples
+    drawFishingRipple(bx, by + 5, 14 + (int)((now / 90) % 8), C565(171, 208, 212));
     if (fishPhase == 2) {
-      gfx->drawCircle(bx, by + 8, 26 + (int)((now / 60) % 6), 0xFFFF);
+      drawFishingRipple(bx, by + 6, 26 + (int)((now / 60) % 6), UI_WHITE);
       for (int i = 0; i < 5; i++) gfx->fillCircle(bx - 20 + i * 10, by - 14 - (int)((now / 40 + i * 7) % 16), 2, 0xFFFF);
-      gfx->setTextSize(4); gfx->setTextColor(0xF800); gfx->setCursor(petX - 6, ground - 118); gfx->print("!");
+      gfx->fillCircle(petX + 2, ground - 105, 18, C565(106, 33, 28));
+      gfx->setTextSize(3);
+      gfx->setTextColor(UI_WHITE);
+      gfx->setCursor(petX - 6, ground - 117);
+      gfx->print("!");
     }
     gfx->fillCircle(bx, by + dip, 7, 0xF800); gfx->fillCircle(bx, by - 3 + dip, 4, 0xFFFF);
   } else {                                                                    // phase 3: it jumps and is caught
@@ -6073,7 +6032,7 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
     gfx->fillRoundRect(x + 4, y - 4, 92, 22, 10, wood);                            // lid, tipped back
     gfx->drawRoundRect(x + 4, y - 4, 92, 22, 10, UI_INK);
     gfx->fillRect(x + 20, y - 2, 8, 18, gold); gfx->fillRect(x + 72, y - 2, 8, 18, gold);
-    for (int i = 0; i < 6 && i < (int)coins + 1; i++) {                            // a heap of coins
+    for (int i = 0; i < 6 && i < coins; i++) {                            // a heap of coins
       gfx->fillCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, gold);
       gfx->drawCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, 0xC480);
     }
@@ -6209,9 +6168,10 @@ void renderAct() {
     }
   }
   if (treasurePick != 9) {
-    gfx->setTextSize(1);
+    gfx->fillRoundRect(CX - 112, 316, 224, 32, 10, glow);
+    gfx->setTextSize(2);
     gfx->setTextColor(UI_INK);
-    gfx->setCursor(CX - 54, 330);
+    gfx->setCursor(CX - 102, 325);
     gfx->print("tap to play again");
   }
   chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
@@ -6724,12 +6684,15 @@ void renderGallery() {
                   300 - (GAL_CELL + t[1] * sc) / 2, sc, !reg);
       }
     }
-    gfx->fillRoundRect(CX - 65, 390, 130, 42, 16, UI_WHITE);
-    gfx->drawRoundRect(CX - 65, 390, 130, 42, 16, UI_INK);
+    gfx->fillRoundRect(CX - 97, 390, 194, 42, 16, UI_WHITE);
+    gfx->drawRoundRect(CX - 97, 390, 194, 42, 16, UI_INK);
+    const char *backLabel = T(S_DETAIL_BACK);
+    const int backLen = (int)strlen(backLabel);
+    const int backSize = backLen <= 15 ? 2 : 1;
     gfx->setTextColor(UI_INK);
-    gfx->setTextSize(2);
-    gfx->setCursor(CX - strlen(T(S_DETAIL_BACK)) * 6, 408);
-    gfx->print(T(S_DETAIL_BACK));
+    gfx->setTextSize(backSize);
+    gfx->setCursor(CX - backLen * 3 * backSize, 411 - 4 * backSize);
+    gfx->print(backLabel);
     gfx->flush();
     return;
   }
