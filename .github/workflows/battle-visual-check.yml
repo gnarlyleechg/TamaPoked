@@ -3,12 +3,16 @@ name: TamaPoke visual pilot verification
 # This isolated workflow checks the draft battle branch only. It never publishes
 # installer files, pushes to the repository, or flashes any device.
 on:
-  push:
-    branches: [codex/tamapoke-battle-scene-polish]
+  pull_request:
+    branches: [codex/pokemon-visual-pilot]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'TamaPoke.ino'
-      - 'sprite_runs.h'
+      - '*.h'
+      - 'sdmon.cpp'
       - 'tools/emu/**'
+      - 'tools/pack_portrait.py'
+      - 'tools/unpack_emulator_assets.py'
       - '.github/workflows/battle-visual-check.yml'
   workflow_dispatch:
 
@@ -21,12 +25,15 @@ concurrency:
 
 jobs:
   host:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install emulator dependency
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Restore existing sprite test fixtures
+        run: python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
       - name: Run real-source host tests
         run: |
           mkdir -p "$RUNNER_TEMP/battle-shots"
@@ -43,6 +50,8 @@ jobs:
           done
           test -s fishing.ppm
           test -s gallerydetail.ppm
+          test -s treasure.ppm
+          test -s treasure__opened_.ppm
       - uses: actions/upload-artifact@v4
         with:
           name: battle-visual-emulator-screens
@@ -50,6 +59,7 @@ jobs:
           retention-days: 7
 
   firmware:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
