@@ -13,6 +13,8 @@ on:
       - 'tools/emu/**'
       - 'tools/pack_portrait.py'
       - 'tools/pokemon_motion.py'
+      - 'tools/bake_pokemon_walk.py'
+      - 'tools/bulbasaur_walk_pilot.py'
       - 'tools/test_pokemon_motion.py'
       - 'tools/unpack_emulator_assets.py'
       - '.github/workflows/battle-visual-check.yml'
@@ -83,10 +85,16 @@ jobs:
           rm -f "$ROOT"/tools/sdcard/mons/*.tpa "$ROOT"/tools/sdcard/mons/portrait-manifest.json
           cd "$ROOT"
           rm -rf "$RUNNER_TEMP/portrait-pilot"
+      - name: Bake original articulated Bulbasaur pilot
+        if: github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'
+        run: |
+          "$RUNNER_TEMP/portrait-venv/bin/python" tools/bulbasaur_walk_pilot.py "$RUNNER_TEMP/battle-shots/bulbasaur"
+          test -s "$RUNNER_TEMP/battle-shots/bulbasaur/bulbasaur-pilot.tpk2"
+          test -s "$RUNNER_TEMP/battle-shots/bulbasaur/bulbasaur-walk.gif"
       - uses: actions/upload-artifact@v4
         with:
           name: battle-visual-emulator-screens
-          path: ${{ runner.temp }}/battle-shots/*.ppm
+          path: ${{ runner.temp }}/battle-shots/
           retention-days: 7
 
   firmware:
