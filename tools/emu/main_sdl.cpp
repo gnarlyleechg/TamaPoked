@@ -242,13 +242,17 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     galleryDirty = true;
     for (int d = 1; d <= 200; d++) pet.dbgHatchAs(d, false);
   }
-  else if (!strcmp(screen, "gallerydetail")) {
+  else if (!strcmp(screen, "gallerydetail") || !strcmp(screen, "portraitpilot")) {
     // The same canonical Bulbasaur used in the visual pilot, selected through
     // the real gallery handler. This only changes the emulator fixture.
-    pet.dbgHatchAs(1, false);
+    const int id = !strcmp(screen, "portraitpilot") ? dex : 1;
+    if (id != 1 && id != 4 && id != 7 && id != 25) return 2;
+    pet.dbgHatchAs(id, false);
     galleryOpen = true; galleryPick = false; galleryDirty = true;
-    galleryRegion = 0; galleryPage = 0; galleryDetail = 0;
-    galleryTap(113, 124);
+    galleryRegion = 0; galleryPage = (id - 1) / 16; galleryDetail = 0;
+    const int cell = (id - 1) % 16;
+    galleryTap(113 + (cell % 4)*80, 124 + (cell / 4)*80);
+    if (galleryDetail != id) return 3;
   }
   else if (!strcmp(screen, "gallery2")) {   // the second region
     galleryOpen = true;
