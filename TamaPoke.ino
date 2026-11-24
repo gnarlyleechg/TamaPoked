@@ -7234,6 +7234,12 @@ void behNext() {
   }
 }
 
+#ifdef TAMAPOKE_EMU
+void emuWalkPilot(int x, bool right, uint32_t elapsed) {
+  beh.x = x; beh.targetX = right ? 450 : 16;
+  beh.mode = 1; beh.until = millis() + 10000; beh.t0 = millis() - elapsed;
+}
+#endif
 void drawPetPMD() {
   uint32_t now = millis();
 
