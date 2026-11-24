@@ -2,6 +2,7 @@
 Generate separate overlapping limb textures and bake the real walk format.
 """
 from PIL import Image,ImageDraw
+import math
 from bake_pokemon_walk import bake,pack_walk
 from pathlib import Path
 import sys
@@ -10,7 +11,16 @@ def canvas():return Image.new("RGBA",(S,S))
 def oval(im,box,color):
     d=ImageDraw.Draw(im);d.ellipse(box,fill=color,outline=(37,75,64),width=2)
     x,y,X,Y=box
-    d.ellipse((x+5,y+4,X-7,Y-9),fill=tuple(min(255,c+15) for c in color))
+    # Smooth directional shading rather than a flat inset oval.
+    for py in range(y+2,Y-1):
+        for px in range(x+2,X-1):
+            nx=(px-(x+X)/2)/((X-x)/2-2)
+            ny=(py-(y+Y)/2)/((Y-y)/2-2)
+            rr=nx*nx+ny*ny
+            if rr>=1:continue
+            z=math.sqrt(1-rr)
+            light=.68+.42*max(0,z*.8-nx*.35-ny*.45)
+            im.putpixel((px,py),tuple(min(255,int(c*light)) for c in color)+(255,))
 def segment(a,b,r,color):
     im=canvas();d=ImageDraw.Draw(im)
     d.line((a,b),fill=(37,75,64),width=2*r+2)
@@ -23,7 +33,7 @@ oval(body,(39,65,137,119),(90,166,141))
 d=ImageDraw.Draw(body)
 d.polygon([(66,77),(61,48),(77,22),(94,32),(112,18),(131,46),(129,73),(104,86)],fill=(55,115,57),outline=(30,70,38),width=2)
 d.polygon([(77,22),(86,48),(79,72),(94,82),(99,48),(112,18),(119,48),(112,74)],fill=(83,151,67))
-oval(body,(14,63,83,111),(105,181,153))
+oval(body,(10,58,88,114),(105,181,153))
 d=ImageDraw.Draw(body)
 d.polygon([(21,74),(22,49),(42,68)],fill=(105,181,153),outline=(37,75,64),width=2)
 d.polygon([(58,66),(73,48),(77,77)],fill=(105,181,153),outline=(37,75,64),width=2)
@@ -33,9 +43,9 @@ d.ellipse((23,82,43,99),fill=(245,238,222),outline=(37,75,64))
 d.ellipse((24,83,34,98),fill=(169,45,57));d.ellipse((25,85,29,90),fill="white")
 d.arc((15,93,49,106),10,150,fill=(37,75,64),width=2)
 limbs=[]
-for i,(a,b,c) in enumerate([((48,103),(43,119),(47,139)),((68,105),(63,122),(62,139)),((106,103),(113,120),(108,139)),((130,103),(137,121),(133,139))]):
+for i,(a,b,c) in enumerate([((48,103),(43,114),(47,130)),((68,105),(63,116),(62,130)),((106,103),(113,114),(108,130)),((130,103),(137,116),(133,130))]):
     color=(75,140,121) if i%2==0 else (99,175,147)
-    limbs.append((a,b,c,segment(a,b,8,color),segment(b,c,7,color)))
+    limbs.append((a,b,c,segment(a,b,9,color),segment(b,c,8,color)))
 frames=bake(1,body,limbs)
 out=Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
 (out/"bulbasaur-pilot.tpk2").write_bytes(pack_walk(frames))
