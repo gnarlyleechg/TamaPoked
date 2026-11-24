@@ -70,7 +70,9 @@ struct {
   float x = 233, targetX = 233;
 } beh;
 #define PET_GROUND 304  // linea de suelo de la mascota
-PmdMon galleryPmd;  // sprite grande de la vista detalle de la galeria (PMD/TPK2, legal)
+PmdMon galleryPmd;  // original animated fallback
+SdPortrait galleryPortrait;
+static void unloadGalleryArt() { galleryPortrait.unload(); galleryPmd.unload(); }
 
 // galeria pokedex
 bool galleryOpen = false;
@@ -1070,7 +1072,7 @@ void handleSerial() {
     galleryOpen = !galleryOpen;
     galleryDetail = 0;
     galleryDirty = true;
-    if (!galleryOpen) galleryPmd.unload();
+    unloadGalleryArt();
     Serial.println("DONE");
   } else if (line == "EGGS") {
     // simula 20 tiradas de huevo (no cambia el estado del juego)
@@ -1357,7 +1359,7 @@ void onSwipeV(int dir) {
   if (sackOpen) { leaveSack(); return; }
   if (spdOpen) { leaveSpeed(); return; }
   if (galleryOpen) {
-    if (galleryDetail) { galleryDetail = 0; galleryPmd.unload(); galleryDirty = true; return; }
+    if (galleryDetail) { galleryDetail = 0; unloadGalleryArt(); galleryDirty = true; return; }
     galleryRegion = (uint8_t)((galleryRegion + (dir > 0 ? 1 : GAL_REGIONS - 1)) % GAL_REGIONS);
     galleryPage = 0;
     galleryDirty = true;
@@ -1761,7 +1763,7 @@ void onSwipe(int dir) {
   }
   if (galleryDetail) {  // en detalle: volver a la rejilla
     galleryDetail = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     galleryDirty = true;
     return;
   }
@@ -1769,7 +1771,7 @@ void onSwipe(int dir) {
   if (np < 0) {                // back past the first page = the region chooser
     galleryPick = true;
     rpickPage = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     return;
   }
   if (np > GAL_PAGES - 1) np = GAL_PAGES - 1;
@@ -6635,7 +6637,13 @@ void renderGallery() {
     gfx->setTextSize(gts);
     gfx->setCursor(CX - glen * (gts == 3 ? 9 : 6), gts == 3 ? 56 : 60);
     gfx->print(head);
-    if (galleryPmd.loaded) {
+    if (reg && galleryPortrait.view.pixels) {
+      const int left = CX - galleryPortrait.view.w / 2;
+      const int top = 300 - galleryPortrait.view.h;
+      galleryPortrait.view.draw([&](int x, int y, int len, uint16_t *row) {
+        gfx->draw16bitRGBBitmap(left + x, top + y, row, len, 1);
+      });
+    } else if (galleryPmd.loaded) {
       // animado y a color si esta registrado; silueta estatica si no (estilo "?")
       drawPmdActM(galleryPmd, PMD_IDLE, CX, 300, reg ? millis() : 0, true, !reg, 6);
     } else {
@@ -6720,13 +6728,13 @@ void renderGallery() {
 void galleryTap(int16_t x, int16_t y) {
   if (galleryDetail) {  // volver a la rejilla
     galleryDetail = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     galleryDirty = true;
     return;
   }
   if (y < 72) {  // tocar la cabecera = salir
     galleryOpen = false;
-    galleryPmd.unload();
+    unloadGalleryArt();
     return;
   }
   // C++ truncates negative division toward zero: guard the outer edges
@@ -6737,7 +6745,11 @@ void galleryTap(int16_t x, int16_t y) {
   int16_t dex = GAL_LO + galleryPage * GAL_PER_PAGE + r * 4 + c;
   if (dex > GAL_HI || dex > DEX_COUNT) return;
   galleryDetail = dex;
-  galleryPmd.load(dex, pet.isShinyRegistered(dex));
+  unloadGalleryArt();
+  const bool shiny = pet.isShinyRegistered(dex);
+  // Never expose an unregistered species via the optional art path.
+  if (!pet.isRegistered(dex) || !galleryPortrait.load(dex, shiny))
+    galleryPmd.load(dex, shiny);
 }
 
 void drawBattery() {
