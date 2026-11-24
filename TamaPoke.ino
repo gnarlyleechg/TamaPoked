@@ -25,6 +25,7 @@
 #include "home_backs.h"
 #include "fishing_back.h"
 #include "scene_backs.h"
+#include "training_scenes.h"
 #include "sprite_runs.h"
 #include "sprite_fit.h"
 #include "badges.h"
@@ -2774,9 +2775,8 @@ void drawGameScene();  // prototipo (definida mas abajo)
 
 void renderSack() {
   uint32_t now = millis();
-  drawGameScene();  // fondo del habitat
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  scene_art::training(gfx, scene_art::Strength);
+  const uint16_t ink = UI_INK;
 
   // pantalla de resultado
   if (sackOverUntil) {
@@ -2864,30 +2864,14 @@ void renderSack() {
 
 // fondo del minijuego: hatibat del bicho (cielo por hora + suelo del bioma)
 void drawGameScene() {
-  int hh = sceneHour();
-  bool night = hh < 6 || hh >= 20;
-  uint16_t top, bot;
-  if (night)       { top = C565(0x0c, 0x12, 0x24); bot = C565(0x1e, 0x26, 0x46); }
-  else if (hh < 8) { top = C565(0xd1, 0x6a, 0x86); bot = C565(0xf3, 0xb8, 0x7c); }
-  else if (hh < 18){ top = C565(0x8f, 0xc8, 0xea); bot = C565(0xdc, 0xee, 0xe6); }
-  else             { top = C565(0xc7, 0x5a, 0x4a); bot = C565(0xf0, 0xae, 0x64); }
-  int hor = 376;
-  for (int y = 0; y < hor; y += 8)
-    gfx->fillRect(0, y, 466, 8, lerp565(top, bot, y, hor));
-  if (night)
-    for (auto &st : STARS) gfx->fillRect(st[0], st[1], 4, 4, UI_WHITE);
-  uint8_t bio = pet.isEgg() ? 0 : DEX_TBL[pet.speciesId].biome;
-  uint16_t soil = BIOME_SOIL[bio < 6 ? bio : 0];
-  if (night) soil = lerp565(soil, C565(0x16, 0x1c, 0x30), 9, 16);
-  gfx->fillRect(0, hor, 466, 466 - hor, soil);
+  scene_art::training(gfx, scene_art::Ball);
 }
 
 void renderGame() {
   // sin fillScreen(NEGRO): drawGameScene cubre los 466x466 completos. Si el
   // DMA del flush anterior aun lee el buffer, vera contenido valido (no negro
   // a medio pintar), que era el parpadeo a 25 fps.
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  const uint16_t ink = UI_INK;
 
   if (gameOverUntil) {
     drawGameScene();
@@ -3525,8 +3509,16 @@ static void drawIndexedBackdrop(int left, int top, int w, int h,
   }
 }
 
-// A battle uses the opponent's native biome and the current in-game time.
+// Trainer battles retain their gym location when the opponent changes.
+// Other battles use the opponent habitat and time as before.
 static void drawBattleBack() {
+  const int key = scene_art::gymKey(btlRegion, btlTrainer, GYM_REGIONS, TRAINER_COUNT);
+  if (key >= 0) {
+    const Trainer &tr = BTL_TRAINERS[btlTrainer];
+    const int hour = sceneHour();
+    scene_art::gym(gfx, btlRegion, btlTrainer, tr.type, typeColor(tr.type), hour < 6 || hour >= 20);
+    return;
+  }
   const int16_t dex = btlFoe.dex;
   if (dex < 1 || dex > DEX_COUNT) { gfx->fillCircle(CX, CY, 231, UI_BG_DAY); return; }
   uint8_t biome = DEX_TBL[dex].biome;
@@ -3691,6 +3683,7 @@ void startTrainerBattle(uint8_t idx, bool hard) {
   // size cap on top, plus a smarter AI and better opposing IVs.
   buildSquad(top, hard ? tr.count : TRAINER_TEAM_MAX, squadMask);
   if (!btlSquadN) return;
+  btlRegion = gymRegion;  // snapshot region for the entire fight
   btlTrainer = (int8_t)idx;
   btlHard = hard;
   btlFoeAt = 0;
@@ -4685,9 +4678,8 @@ void spdTap(int16_t x, int16_t y) {
 
 void renderSpeed() {
   uint32_t now = millis();
-  drawGameScene();
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  scene_art::training(gfx, scene_art::Reaction);
+  const uint16_t ink = UI_INK;
 
   if (spdOverUntil) {
     if (now > spdOverUntil) { spdOpen = false; return; }
