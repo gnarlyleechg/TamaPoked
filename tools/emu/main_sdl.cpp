@@ -7,6 +7,7 @@
 #include "pet.h"
 #include "party.h"
 #include "battle.h"
+#include "moves.h"
 #include <chrono>
 #include <string>
 #include <deque>
@@ -198,6 +199,54 @@ static void writePPM(const char *path) {
   }
   fclose(f);
   printf("wrote %s\n", path);
+}
+
+// Run the sketch's normal animation renderer on a fixed clock for repeatable
+// frame-by-frame inspection. Only the initial walk destination is scripted.
+static int starterActionShot(const char *screen, const char *out, int dex) {
+  if (dex < 1 || dex > DEX_COUNT) return 2;
+  extern void emuSetCaptureTime(uint32_t);
+  extern void emuWalkPilot(int, bool, uint32_t);
+  extern void battleTap(int16_t, int16_t);
+  pet.dbgHatchAs(dex, false);
+  pet.ageMinutes = 7UL * MINUTES_PER_LEVEL;
+  pet.relearnFromLevel();
+  while (pet.hasLearnOffer()) pet.declineLearn();
+  pet.ceremony = 0;
+  pet.sleeping = false;
+  loop();  // sync the sprite for this species
+  pet.dbgSetSeen(13UL * 3600);  // midday is consistent across runs
+  const uint32_t start = millis() + 5000;  // skip starter ceremony banners
+  emuSetCaptureTime(start);
+
+  if (!strcmp(screen, "starterwalk")) {
+    emuWalkPilot(155, true, 0);
+  } else if (!strcmp(screen, "startereat")) {
+    pet.feed();
+  } else if (!strcmp(screen, "startersleep")) {
+    pet.toggleLight();
+  } else {
+    startBattle(19, 8);
+  }
+  for (int i = 0; i < 24; ++i) {
+    emuSetCaptureTime(start + i * 100);
+    if (i == 4 && !strcmp(screen, "starterbattle")) {
+      battleTap(233, 296);
+      for (int slot = 0; slot < MOVE_SLOTS; ++slot) {
+        const uint8_t move = btlYou.moves[slot];
+        if (move && MOVE_TBL[move].power && MOVE_TBL[move].acc == 100) {
+          battleTap(149 + (slot % 2) * 168, 296 + (slot / 2) * 52);
+          break;
+        }
+      }
+      if (!btlLungeUntil[0]) return 3;
+    }
+    render();
+    char name[512];
+    snprintf(name, sizeof name, "%s-%02d.ppm", out, i);
+    writePPM(name);
+  }
+  return 0;
 }
 
 static int shotMode(const char *screen, const char *out, int lvl, int iv, int dex) {
@@ -400,6 +449,9 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     }
     if (!strcmp(screen, "partyfull")) partyPick = true;
   }
+  if (!strcmp(screen, "starterwalk") || !strcmp(screen, "startereat") ||
+      !strcmp(screen, "startersleep") || !strcmp(screen, "starterbattle"))
+    return starterActionShot(screen, out, dex);
   if (!strcmp(screen, "homewalkpilot")) {
     extern void emuWalkPilot(int, bool, uint32_t);
     pet.dbgHatchAs(1, false);

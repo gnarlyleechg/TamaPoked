@@ -69,6 +69,8 @@ struct {
   uint8_t act = PMD_IDLE;
   uint32_t t0 = 0;      // inicio de la animacion en curso
   uint32_t until = 0;   // fin del estado actual
+  uint32_t lastWalkFrame = 0, walkElapsed = 0, moodSince = 0;
+  PetMood mood = MOOD_HAPPY;
   float x = 233, targetX = 233;
 } beh;
 #define PET_GROUND 304  // linea de suelo de la mascota
@@ -531,7 +533,7 @@ int8_t btlSwapWho = -1;        // 0 = your side, 1 = the foe's, -1 = nothing due
 #define BTL_ENTER_MS 420
 // battle menu: 0 = FIGHT/POKEMON, 1 = the moves, 2 = the switch list
 uint8_t btlMenu = 0;
-#define BTL_LUNGE_MS 260
+#define BTL_LUNGE_MS 500
 #define BTL_HIT_MS 420
 char btlMsg[6][40];
 uint8_t btlMsgCount = 0;   // queued lines; a tap shows the next
@@ -789,9 +791,7 @@ void ensureMon() {
   monShinyFor = pet.shiny;
   mon.unload();
   pmd.unload();
-  beh.x = beh.targetX = 233;
-  beh.mode = 0;
-  beh.until = 0;
+  beh = {};
   if (pet.speciesId >= 1 && pet.speciesId <= DEX_COUNT) {
     pmd.load(pet.speciesId, pet.shiny);          // principal: PMD
     if (!pmd.loaded) mon.load(pet.speciesId, pet.shiny);  // respaldo: B/N
@@ -3893,18 +3893,25 @@ static void btlResolve(uint8_t yourMove) {
   uint8_t mb = youFirst ? foeMove : yourMove;
 
   uint16_t hp0You = btlYou.hp, hp0Foe = btlFoe.hp;
+  const int first = youFirst ? 0 : 1;
+  const int second = 1 - first;
+  btlLungeUntil[0] = btlLungeUntil[1] = 0;
+  btlHitUntil[0] = btlHitUntil[1] = 0;
+  const uint16_t hpA = a->hp, hpB = b->hp;
   battleAct(*a, *b, ma, lg);
+  if (a->hp < hpA) btlHitUntil[first] = now + BTL_HIT_MS;
+  if (b->hp < hpB) btlHitUntil[second] = now + BTL_HIT_MS;
   btlNarrate(*a, *b, lg);
-  if (lg.damage && !lg.hurtSelf) btlLungeUntil[a == &btlYou ? 0 : 1] = now + BTL_LUNGE_MS;
+  if (lg.damage && !lg.hurtSelf) btlLungeUntil[first] = now + BTL_LUNGE_MS;
   if (!b->fainted()) {
+    const uint16_t replyHpA = a->hp, replyHpB = b->hp;
+    const uint32_t replyAt = now + BTL_LUNGE_MS;
     battleAct(*b, *a, mb, lg);
+    if (a->hp < replyHpA) btlHitUntil[first] = replyAt + BTL_HIT_MS;
+    if (b->hp < replyHpB && !btlHitUntil[second]) btlHitUntil[second] = replyAt + BTL_HIT_MS;
     btlNarrate(*b, *a, lg);
-    if (lg.damage && !lg.hurtSelf)
-      btlLungeUntil[b == &btlYou ? 0 : 1] = now + BTL_LUNGE_MS + BTL_LUNGE_MS;
+    if (lg.damage && !lg.hurtSelf) btlLungeUntil[second] = replyAt + BTL_LUNGE_MS;
   }
-  // whoever actually lost health flinches, whichever side dealt it
-  if (btlYou.hp < hp0You) btlHitUntil[0] = now + BTL_HIT_MS;
-  if (btlFoe.hp < hp0Foe) btlHitUntil[1] = now + BTL_HIT_MS;
   if (btlLink && btlLinkHost) btlShipResult(yourMove, foeMove, hp0You, hp0Foe);
   if (!btlYou.fainted() && !btlFoe.fainted()) {
     battleEndTurn(btlYou, lg);
@@ -3915,18 +3922,22 @@ static void btlResolve(uint8_t yourMove) {
   // Someone went down. The replacement is NOT swapped in here -- that made the
   // change instant and read as a jump cut. Flag it, let the sprite drop out of
   // frame, and swap when the player dismisses the message.
+  const uint32_t firstHitLeft = btlHitUntil[first] - now;
+  const bool faintedOnReply = btlHitUntil[first] &&
+      firstHitLeft > BTL_HIT_MS && firstHitLeft <= BTL_HIT_MS + BTL_LUNGE_MS;
+  const uint32_t firstFaintUntil = now + BTL_FAINT_MS + (faintedOnReply ? BTL_LUNGE_MS : 0);
   if (btlFoe.fainted() && btlLink && btlFoeAt + 1 < btlFoeSquadN) {
-    btlFaintUntil[1] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[1] = first == 1 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 1;
     return;
   }
   if (btlFoe.fainted() && btlTrainer >= 0 && btlFoeAt + 1 < BTL_TRAINERS[btlTrainer].count) {
-    btlFaintUntil[1] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[1] = first == 1 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 1;
     return;
   }
   if (btlYou.fainted() && btlSquadAt + 1 < btlSquadN) {
-    btlFaintUntil[0] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[0] = first == 0 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 0;
     return;
   }
@@ -4037,7 +4048,7 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   bool flash = false;
   if (now < btlFaintUntil[who]) {          // sinks out of frame as it faints
     uint32_t left = btlFaintUntil[who] - now;
-    oy += (int)((BTL_FAINT_MS - left) * 70 / BTL_FAINT_MS);
+    if (left <= BTL_FAINT_MS) oy += (int)((BTL_FAINT_MS - left) * 70 / BTL_FAINT_MS);
   } else if (c.fainted() && btlSwapWho == (int8_t)who) {
     return;                                // gone, waiting to be replaced
   }
@@ -4045,16 +4056,17 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     uint32_t left = btlEnterUntil[who] - now;
     oy += (int)(left * 70 / BTL_ENTER_MS);
   }
-  if (now < btlLungeUntil[who]) {          // lean in, then back out
-    uint32_t left = btlLungeUntil[who] - now;
+  const uint32_t lungeLeft = btlLungeUntil[who] - now;
+  const uint32_t hitLeft = btlHitUntil[who] - now;
+  const bool lunging = btlLungeUntil[who] && lungeLeft && lungeLeft <= BTL_LUNGE_MS;
+  const bool flinching = btlHitUntil[who] && hitLeft && hitLeft <= BTL_HIT_MS;
+  if (lunging) {
+    uint32_t left = lungeLeft;
     int amt = (int)(left > BTL_LUNGE_MS / 2 ? BTL_LUNGE_MS - left : left) * 22 / (BTL_LUNGE_MS / 2);
     ox = who == 0 ? amt : -amt;            // you lunge right, the foe lunges left
     oy = who == 0 ? -amt / 2 : amt / 2;
   }
-  if (now < btlHitUntil[who]) {
-    uint32_t left = btlHitUntil[who] - now;
-    ox += ((left / 50) % 2) ? 5 : -5;      // jitter
-  }
+  if (flinching && !lunging) ox += ((hitLeft / 50) % 2) ? 5 : -5;
 
   // Real PMD playback when the sprite streamed: attack while lunging, hurt
   // while flinching, idle otherwise. `has()` guards every one, because not
@@ -4066,10 +4078,15 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     uint8_t act = PMD_IDLE;
     bool loop = true;
     uint32_t t = now;
-    if (now < btlHitUntil[who] && btlPmd[who].has(PMD_HURT)) {
-      act = PMD_HURT; loop = false; t = now - (btlHitUntil[who] - BTL_HIT_MS);
-    } else if (now < btlLungeUntil[who] && btlPmd[who].has(PMD_ATTACK)) {
-      act = PMD_ATTACK; loop = false; t = now - (btlLungeUntil[who] - BTL_LUNGE_MS);
+    if (lunging && btlPmd[who].has(PMD_ATTACK)) {
+      act = PMD_ATTACK;
+      loop = false;
+      // Fit the authored clip into the lunge so its recovery is visible, too.
+      t = (BTL_LUNGE_MS - lungeLeft) * pmdActTotalMs(btlPmd[who].acts[act]) / BTL_LUNGE_MS;
+    } else if (flinching && btlPmd[who].has(PMD_HURT)) {
+      act = PMD_HURT;
+      loop = false;
+      t = BTL_HIT_MS - hitLeft;
     }
     drawPmdActM(btlPmd[who], act, sx + 24 + ox, sy + 78 + oy, t, loop, false, 4);
     return;
@@ -4080,7 +4097,7 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   // Keep this grounded on the actual frame, rather than assume a 16px sprite.
   const int thumbH = th[1] * 3;
   btlDrawGroundShadow(sx + GAL_CELL / 2, sy + (GAL_CELL - thumbH) / 2 + thumbH);
-  if (now < btlHitUntil[who]) flash = ((btlHitUntil[who] - now) / 60) % 2 == 0;
+  if (flinching && !lunging) flash = (hitLeft / 60) % 2 == 0;
   drawThumb(th, sx + ox, sy + oy, 3, flash);
 }
 
@@ -4192,7 +4209,7 @@ void renderBattle() {
 
   // x=82 not 58: at y=60 the round bezel starts around x=77, and a longer
   // name like BLASTOISE was losing its first characters off the edge
-  btlSide(82, 82, 300, 40, btlFoe, 1);    // foe reads top-left, sprite top-right
+  btlSide(82, 82, 300, 76, btlFoe, 1);    // leave room above the foe for attack effects
   btlSide(250, 190, 76, 168, btlYou, 0);  // you read bottom-right, sprite bottom-left
 
   // Waiting on the other device. Without this the screen is identical to the
@@ -7194,9 +7211,16 @@ void behNext() {
   beh.t0 = now;
   int r = random(100);
   if (r < 35 && (pmd.has(PMD_WALKL) || pmd.has(PMD_WALKR))) {
-    beh.mode = 1;  // paseo
-    beh.targetX = 150 + random(176);
-    beh.until = now + 15000;
+    const int target = 150 + random(176);
+    const uint8_t walk = target > beh.x ? PMD_WALKR : PMD_WALKL;
+    if (fabsf(target - beh.x) >= 24 && pmd.has(walk)) {
+      beh.mode = 1;
+      beh.targetX = target;
+      beh.lastWalkFrame = now;
+      beh.walkElapsed = 0;
+      beh.until = now + 15000;
+      return;
+    }
   } else if (r < 60) {
     // gesto aleatorio entre los disponibles
     // (Hop fuera: salta demasiado alto; Sit fuera: mira hacia atras)
@@ -7210,18 +7234,20 @@ void behNext() {
       beh.until = now + pmdActTotalMs(pmd.acts[beh.act]);
       return;
     }
-    beh.mode = 0;
-    beh.until = now + 2000 + random(3000);
-  } else {
-    beh.mode = 0;  // mirar al frente
-    beh.until = now + 2000 + random(3000);
   }
+  beh.mode = 0;
+  beh.until = now + 2000 + random(3000);
 }
 
 #ifndef ARDUINO
 void emuWalkPilot(int x, bool right, uint32_t elapsed) {
-  beh.x = x; beh.targetX = right ? 450 : 16;
-  beh.mode = 1; beh.until = millis() + 10000; beh.t0 = millis() - elapsed;
+  const uint32_t now = millis();
+  beh.x = x;
+  beh.targetX = right ? 325 : 150;
+  beh.mode = 1;
+  beh.until = now + 10000;
+  beh.lastWalkFrame = now;
+  beh.walkElapsed = elapsed;
 }
 #endif
 void drawPetPMD() {
@@ -7233,37 +7259,58 @@ void drawPetPMD() {
   }
   if (evoPmd.loaded) evoPmd.unload();  // termino la evolucion: libera la forma anterior
 
-  PetMood m = pet.mood();
-  uint8_t act;
-  bool loop = true;
-  if (m == MOOD_SLEEPING && pmd.has(PMD_SLEEP)) {
-    act = PMD_SLEEP;
+  const PetMood mood = pet.mood();
+  if (mood != beh.mood) {
+    beh.mood = mood;
+    beh.moodSince = now;
     beh.mode = 0;
-  } else if (m == MOOD_EATING && pmd.has(PMD_EAT)) {
-    act = PMD_EAT;
-    beh.t0 = 0;
-  } else if (m == MOOD_SAD && pmd.has(PMD_HURT)) {
-    act = PMD_HURT;
-  } else {
-    // contento: el planificador decide (idle / paseo / gesto)
-    if (now > beh.until) behNext();
-    if (beh.mode == 1) {
-      float d = beh.targetX - beh.x;
-      if (fabsf(d) < 4) {
-        behNext();
-        act = PMD_IDLE;
-      } else {
-        beh.x += (d > 0 ? 3.0f : -3.0f);
-        act = (d > 0) ? PMD_WALKR : PMD_WALKL;
-      }
-    } else {
-      act = (beh.mode == 2) ? beh.act : PMD_IDLE;
-      loop = false;
-    }
-    if (!pmd.has(act)) act = PMD_IDLE;
+    beh.t0 = now;
+    beh.until = now + 2000;
   }
 
-  drawPmdAct(act, (int)beh.x, PET_GROUND, now - beh.t0, loop || act == PMD_IDLE, false, 5);
+  uint8_t act = PMD_IDLE;
+  uint32_t elapsed = now - beh.t0;
+  bool loop = true;
+  if (mood != MOOD_HAPPY) {
+    elapsed = now - beh.moodSince;
+    const uint8_t pose = mood == MOOD_SLEEPING ? PMD_SLEEP :
+                         mood == MOOD_EATING ? PMD_EAT : PMD_HURT;
+    if (pmd.has(pose)) act = pose;
+  } else {
+    if (now > beh.until) behNext();
+    elapsed = now - beh.t0;
+    if (beh.mode == 1) {
+      const float distance = beh.targetX - beh.x;
+      const uint8_t walk = distance > 0 ? PMD_WALKR : PMD_WALKL;
+      const uint32_t sinceFrame = now - beh.lastWalkFrame;
+      // Pause through a hidden screen or a long stall rather than jumping.
+      const uint32_t delta = sinceFrame > 250 ? 0 : sinceFrame;
+      if (pmd.has(walk)) {
+        // One loop covers a fixed stretch of floor at the authored cadence.
+        const float step = 44.0f * delta / pmdActTotalMs(pmd.acts[walk]);
+        if (step < fabsf(distance)) {
+          beh.x += distance > 0 ? step : -step;
+          beh.lastWalkFrame = now;
+          beh.walkElapsed += delta;
+          act = walk;
+          elapsed = beh.walkElapsed;
+        } else {
+          beh.x = beh.targetX;
+        }
+      }
+      if (act == PMD_IDLE) {
+        beh.mode = 0;
+        beh.t0 = now;
+        beh.until = now + 2000;
+        elapsed = 0;
+      }
+    } else if (beh.mode == 2 && pmd.has(beh.act)) {
+      act = beh.act;
+      loop = false;
+    }
+  }
+
+  drawPmdAct(act, (int)beh.x, PET_GROUND, elapsed, loop, false, 5);
 
   if (pet.showHeart()) drawMap(SPR_HEART, 32, (int)beh.x + 50, PET_GROUND - 190, 2, false);
 }

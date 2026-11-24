@@ -6,6 +6,7 @@
 #include "pet.h"
 #include "party.h"
 #include "battle.h"
+#include "moves.h"
 #include <cstdio>
 uint32_t g_seed=31; FakeSerial Serial; FakeESP ESP; FakeWire Wire;
 volatile int g_touchX=0,g_touchY=0; volatile bool g_touchDown=false;
@@ -22,6 +23,8 @@ extern uint8_t btlMsgCount;
 extern uint32_t btlHitUntil[2], btlLungeUntil[2];
 extern uint16_t btlHpShown[2];
 void startBattle(int16_t dex, uint8_t lvl);
+void battleTap(int16_t x, int16_t y);
+void emuSetCaptureTime(uint32_t now);
 
 static int bad=0;
 static void ck(bool ok,const char*w){printf("%s  %s\n",ok?"PASS":"FAIL",w); if(!ok)bad++;}
@@ -87,6 +90,25 @@ int main(){
   uint16_t hp = btlYou.hp;
   for (int i=0;i<20;i++) render();
   ck(btlYou.hp==hp, "rendering alone never changes anyone's health");
+  // Drive an actual exchange. A reply must not overlap the first lunge or
+  // show its target's flinch before that reply starts.
+  emuSetCaptureTime(10000);
+  startBattle(19, 50);
+  for (int slot = 0; slot < MOVE_SLOTS; ++slot)
+    btlYou.moves[slot] = btlFoe.moves[slot] = 0;
+  btlYou.moves[0] = btlFoe.moves[0] = MV_TACKLE;
+  btlYou.base[SI_SPE] = 999;
+  btlFoe.base[SI_SPE] = 1;
+  btlYou.maxHp = btlYou.hp = btlFoe.maxHp = btlFoe.hp = 1000;
+  battleTap(233, 296);
+  battleTap(149, 296);
+  ck(btlYou.hp < 1000 && btlFoe.hp < 1000, "both moves deal damage once");
+  ck(btlLungeUntil[0] > 10000 && btlLungeUntil[1] > btlLungeUntil[0],
+     "the reply has its own lunge window");
+  ck(btlHitUntil[1] > 10000 &&
+     btlHitUntil[0] - btlHitUntil[1] == btlLungeUntil[1] - btlLungeUntil[0],
+     "each hit reaction follows its attack in turn order");
+
   printf("%s\n", bad?"FAILURES":"all good");
   return bad?1:0;
 }
