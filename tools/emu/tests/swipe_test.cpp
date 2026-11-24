@@ -19,7 +19,8 @@ extern Pet pet;
 extern bool cardOpen, galleryOpen, clockOpen, kbOpen, menuOpen, partyOpen, partyPick;
 extern bool trainOpen, movePickOpen, battleOpen, gymOpen, playerOpen, boxOpen, pickOpen;
 extern uint8_t cardPage, gymPage, playerPage, movePickPage, boxPage, pickPage, partyDetail;
-extern int galleryPage; extern bool galleryDirty; extern uint8_t galleryDetail;
+extern int galleryPage; extern bool galleryDirty; extern int16_t galleryDetail;
+void galleryTap(int16_t x, int16_t y);
 extern uint8_t galleryRegion;
 extern uint8_t gymRegion;
 extern bool gymPick, galleryPick;
@@ -117,6 +118,33 @@ int main(){
       printf("FAIL  gallery    a vertical swipe does not change region\n"); bad++;
     } else printf("PASS  %-10s changes region on a vertical swipe\n", "gallery");
   }
+  // Negative offsets smaller than a cell used to truncate toward zero and
+  // open species 1 when tapping outside the collection grid.
+  clearAll(); galleryOpen=true; galleryPick=false; galleryDetail=0;
+  galleryPage=0; galleryRegion=0;
+  galleryTap(72, 124);
+  if (galleryDetail != 0) { printf("FAIL  gallery    left gutter opened a species\n"); bad++; galleryTap(233,408); }
+  galleryTap(113, 83);
+  if (galleryDetail != 0) { printf("FAIL  gallery    top gutter opened a species\n"); bad++; galleryTap(233,408); }
+  galleryTap(113,124);
+  if (galleryDetail != REGIONS[0].lo) { printf("FAIL  gallery    first card selects wrong species\n"); bad++; }
+  else printf("PASS  gallery    edge taps ignored and first card opens correct species\n");
+  if (galleryDetail) galleryTap(233,408);
+  // Also exercise a species beyond the uint8_t boundary through real input.
+  for (int r = 0; r < REGION_COUNT - 1; ++r) {
+    if (REGIONS[r].hi <= 255) continue;
+    galleryRegion = r;
+    const int target = REGIONS[r].lo > 256 ? REGIONS[r].lo : 256;
+    const int offset = target - REGIONS[r].lo;
+    galleryPage = offset / 16;
+    const int cell = offset % 16;
+    galleryTap(113 + (cell % 4) * 80, 124 + (cell / 4) * 80);
+    if (galleryDetail != target) { printf("FAIL  gallery    high species ID truncated\n"); bad++; }
+    else printf("PASS  gallery    high species ID preserved\n");
+    if (galleryDetail) galleryTap(233,408);
+    break;
+  }
+
   // The gym ladder changes REGION on a vertical swipe, the same gesture the
   // Pokedex uses. Without this the Johto and Hoenn ladders exist but cannot be
   // reached, which is a worse failure than a paging bug: nothing looks broken.

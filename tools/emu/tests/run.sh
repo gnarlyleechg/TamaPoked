@@ -55,7 +55,7 @@ needs_sketch() { case "$1" in touch_test|flush_test|joy_test|anim_test|swipe_tes
 # and these are standalone: gbsynth.cpp has no Arduino dependency at all, which
 # is the point of it -- linking the game core in would only demand stubs for
 # symbols the test never calls.
-standalone() { case "$1" in synth_test|chess_test|touchcal_test) return 0;; *) return 1;; esac; }
+standalone() { case "$1" in synth_test|chess_test|touchcal_test|sprite_runs_test|portrait_test) return 0;; *) return 1;; esac; }
 
 # sprite_test drives PmdMon straight off the sprite directory, so it needs the
 # host's SD stubs but none of the sketch
@@ -71,6 +71,8 @@ for src in "$HERE"/*_test.cpp; do
   srcs=("${CORE[@]}")
   standalone "$name" && srcs=("$ROOT/gbsynth.cpp")
   [ "$name" = chess_test ] && srcs=("$ROOT/chess.cpp")
+  [ "$name" = sprite_runs_test ] && srcs=()
+  [ "$name" = portrait_test ] && srcs=()
   # every test starts from a clean NVS so one cannot leak state into the next
   rm -f "$OUT/tamapoke.nvs"
   if ! g++ "${FLAGS[@]}" -o "$OUT/$name" "$src" "${srcs[@]}" "${extra[@]}" 2>"$OUT/$name.log"; then
@@ -89,4 +91,4 @@ done
 
 echo
 echo "suites passed: $pass, failed: $fail"
-[ "$fail" -eq 0 ]
+[ "$pass" -gt 0 ] && [ "$fail" -eq 0 ]

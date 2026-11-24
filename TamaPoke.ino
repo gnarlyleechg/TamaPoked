@@ -24,6 +24,7 @@
 #include "linknow.h"
 #include "backs.h"
 #include "home_backs.h"
+#include "sprite_runs.h"
 #include "badges.h"
 #include "avatars.h"
 #include <stdarg.h>
@@ -69,7 +70,9 @@ struct {
   float x = 233, targetX = 233;
 } beh;
 #define PET_GROUND 304  // linea de suelo de la mascota
-PmdMon galleryPmd;  // sprite grande de la vista detalle de la galeria (PMD/TPK2, legal)
+PmdMon galleryPmd;  // original animated fallback
+SdPortrait galleryPortrait;
+static void unloadGalleryArt() { galleryPortrait.unload(); galleryPmd.unload(); }
 
 // galeria pokedex
 bool galleryOpen = false;
@@ -80,6 +83,7 @@ bool galleryDirty = false;
 // pages within it, so nothing is ever more than ten pages from the front.
 // ALL is deliberately not offered here -- it is the thing being replaced.
 #define GAL_PER_PAGE 16
+#define GAL_CELL 80  // shared by gallery thumbnails and battle fallback
 #define GAL_REGIONS (REGION_COUNT - 1)          // the real regions, not ALL
 #define GAL_LO (REGIONS[galleryRegion % GAL_REGIONS].lo)
 #define GAL_HI (REGIONS[galleryRegion % GAL_REGIONS].hi)
@@ -1069,7 +1073,7 @@ void handleSerial() {
     galleryOpen = !galleryOpen;
     galleryDetail = 0;
     galleryDirty = true;
-    if (!galleryOpen) galleryPmd.unload();
+    unloadGalleryArt();
     Serial.println("DONE");
   } else if (line == "EGGS") {
     // simula 20 tiradas de huevo (no cambia el estado del juego)
@@ -1356,7 +1360,7 @@ void onSwipeV(int dir) {
   if (sackOpen) { leaveSack(); return; }
   if (spdOpen) { leaveSpeed(); return; }
   if (galleryOpen) {
-    if (galleryDetail) { galleryDetail = 0; galleryPmd.unload(); galleryDirty = true; return; }
+    if (galleryDetail) { galleryDetail = 0; unloadGalleryArt(); galleryDirty = true; return; }
     galleryRegion = (uint8_t)((galleryRegion + (dir > 0 ? 1 : GAL_REGIONS - 1)) % GAL_REGIONS);
     galleryPage = 0;
     galleryDirty = true;
@@ -1760,7 +1764,7 @@ void onSwipe(int dir) {
   }
   if (galleryDetail) {  // en detalle: volver a la rejilla
     galleryDetail = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     galleryDirty = true;
     return;
   }
@@ -1768,7 +1772,7 @@ void onSwipe(int dir) {
   if (np < 0) {                // back past the first page = the region chooser
     galleryPick = true;
     rpickPage = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     return;
   }
   if (np > GAL_PAGES - 1) np = GAL_PAGES - 1;
@@ -3953,12 +3957,41 @@ static void btlHpBar(int x, int y, int w, const Combatant &c, uint16_t shown) {
   gfx->drawRoundRect(x, y, w, 14, 4, UI_INK);
 }
 
+// A few broad value changes make the existing biome art feel like a stage
+// without extra bitmaps, new species art, or per-frame PSRAM allocations.
+static void btlDrawLowerDeck() {
+  const uint16_t nearCol = C565(0xe9, 0xe9, 0xe3);
+  const uint16_t farCol  = C565(0xc4, 0xd7, 0xd1);
+  for (int y = 254; y < 466; y += 24) {
+    const int h = ((466 - y) < 24) ? 466 - y : 24;
+    gfx->fillRect(0, y, 466, h, lerp565(farCol, nearCol, y - 254, 212));
+  }
+  gfx->fillRect(0, 253, 466, 3, C565(0x6b, 0x80, 0x76));
+}
+
+// Visual-only button wrapper; dimensions and touch hit areas stay unchanged.
+static void btlDrawButton(int x, int y, int w, int h, uint16_t color) {
+  gfx->fillRoundRect(x, y + 3, w, h, 10, UI_TRACK);
+  gfx->fillRoundRect(x, y, w, h, 10, color);
+  gfx->drawRoundRect(x, y, w, h, 10, UI_INK);
+  gfx->fillRect(x + 14, y + 4, w - 28, 2, UI_WHITE);
+}
+
+// Keep the arena shadow tied to the base of the actual sprite frame.
+static void btlDrawGroundShadow(int footX, int footY) {
+  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
+  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
+}
+
 static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t who) {
-  // the scenes are busy, so the name and bar sit on their own plate rather
-  // than fighting the artwork for contrast
+  // Raised, species-accented name plates keep small text readable over scenery.
   int ph = (who == 0) ? 54 : 40;
+  gfx->fillRoundRect(tx - 6, ty - 5, 158, ph, 8, UI_TRACK);
   gfx->fillRoundRect(tx - 8, ty - 8, 158, ph, 8, UI_BG_DAY);
   gfx->drawRoundRect(tx - 8, ty - 8, 158, ph, 8, UI_INK);
+  const uint16_t accent = (c.dex >= 1 && c.dex <= DEX_COUNT)
+                            ? DEX_TBL[c.dex].accent : UI_INK;
+  gfx->fillRoundRect(tx - 6, ty + 1, 4, ph - 18, 2, accent);
   char l[28];
   snprintf(l, sizeof(l), "%s Lv.%u", c.name, c.level);
   gfx->setTextColor(UI_INK);
@@ -4014,6 +4047,8 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   // every species ships every action -- falling through to idle, and to the
   // flat thumbnail if the sprite is missing entirely (no SD).
   if (btlPmd[who].loaded) {
+    // PMD actions use an explicit fixed feet anchor.
+    btlDrawGroundShadow(sx + 24, sy + 78);
     uint8_t act = PMD_IDLE;
     bool loop = true;
     uint32_t t = now;
@@ -4027,6 +4062,10 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   }
   const uint8_t *th = thumbs.get(c.dex);
   if (!th) return;
+  // drawThumb centers the bitmap in GAL_CELL; its height is stored in th[1].
+  // Keep this grounded on the actual frame, rather than assume a 16px sprite.
+  const int thumbH = th[1] * 3;
+  btlDrawGroundShadow(sx + GAL_CELL / 2, sy + (GAL_CELL - thumbH) / 2 + thumbH);
   if (now < btlHitUntil[who]) flash = ((btlHitUntil[who] - now) / 60) % 2 == 0;
   drawThumb(th, sx + ox, sy + oy, 3, flash);
 }
@@ -4133,9 +4172,9 @@ void renderBattle() {
   btlEaseBars();
   gfx->fillScreen(RGB565_BLACK);
   drawBattleBack();
-  // the lower band stays flat so the move grid and the HP text keep their
-  // contrast against it
-  gfx->fillRect(0, 254, 466, 212, UI_BG_DAY);
+  // Subtle ground gradient and horizon line; the existing controls remain
+  // in their original positions with the same generous touch regions.
+  btlDrawLowerDeck();
 
   // x=82 not 58: at y=60 the round bezel starts around x=77, and a longer
   // name like BLASTOISE was losing its first characters off the edge
@@ -4173,8 +4212,7 @@ void renderBattle() {
     // rows do not fit: the panel is round, and at that depth the chord is only
     // ~250 px. The lower two reuse the move grid's cells, so they inherit its
     // padded hit areas -- which is what made POKEMON hard to press before.
-    gfx->fillRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_BG_DAY);
-    gfx->drawRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_INK);
+    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_BG_DAY);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - (int)strlen(T(S_FIGHT)) * 6, BTL_GRID_Y + 14);
@@ -4182,16 +4220,14 @@ void renderBattle() {
     const char *low[2] = { T(S_BTL_SWITCH), T(S_BTL_RUN) };
     for (int i = 0; i < 2; i++) {
       int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, UI_TRACK);
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(low[i]) * 12) / 2, y + 14);
       gfx->print(low[i]);
     }
   } else if (btlMenu == 3) {           // "Run away?" -- YES left, NO under the old RUN spot
-    gfx->fillRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_WHITE);
-    gfx->drawRoundRect(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, 10, UI_INK);
+    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_WHITE);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - (int)strlen(T(S_BTL_RUN_Q)) * 6, BTL_GRID_Y + 14);
@@ -4199,8 +4235,7 @@ void renderBattle() {
     const char *yn[2] = { T(S_YES), T(S_NO) };
     for (int i = 0; i < 2; i++) {
       int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, i ? UI_BAR_OK : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, i ? UI_BAR_OK : UI_TRACK);
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(yn[i]) * 12) / 2, y + 14);
@@ -4213,8 +4248,8 @@ void renderBattle() {
       int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
       const Combatant &m = (i == btlSquadAt) ? btlYou : btlSquad[i];
       bool usable = (i != btlSquadAt) && !m.fainted();
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, usable ? UI_BG_DAY : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, usable ? UI_INK : 0x8410);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, usable ? UI_BG_DAY : UI_TRACK);
+      if (!usable) gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, 0x8410);
       gfx->setTextColor(usable ? UI_INK : 0x8410);
       gfx->setTextSize(1);
       gfx->setCursor(x + 10, y + 10);
@@ -4229,8 +4264,7 @@ void renderBattle() {
     for (int i = 0; i < MOVE_SLOTS; i++) {
       int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
       uint8_t mv = btlYou.moves[i];
-      gfx->fillRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, mv ? UI_BG_DAY : UI_TRACK);
-      gfx->drawRoundRect(x, y, BTL_CELL_W, BTL_CELL_H, 10, UI_INK);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, mv ? UI_BG_DAY : UI_TRACK);
       if (!mv) continue;
       gfx->setTextColor(UI_INK);
       gfx->setTextSize(1);
@@ -5540,9 +5574,12 @@ void renderTrain() {
   for (int i = 0; i < 3; i++) {
     int y = TRAIN_ROW_Y(i);
     bool passive = false;      // every row opens a game now, DEF included
+    const uint16_t skillColor[3] = { C565(188, 83, 65), C565(74, 140, 167), C565(91, 142, 106) };
+    gfx->fillRoundRect(TRAIN_X + 18, y + 2, TRAIN_W - 36, TRAIN_ROW_H, 12, UI_TRACK);
     gfx->fillRoundRect(TRAIN_X + 18, y, TRAIN_W - 36, TRAIN_ROW_H, 12,
-                       passive ? UI_TRACK : UI_BG_DAY);
+                       passive ? UI_TRACK : lerp565(skillColor[i], UI_WHITE, 7, 8));
     gfx->drawRoundRect(TRAIN_X + 18, y, TRAIN_W - 36, TRAIN_ROW_H, 12, UI_INK);
+    gfx->fillRoundRect(TRAIN_X + 23, y + 9, 4, TRAIN_ROW_H - 18, 2, skillColor[i]);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(TRAIN_X + 32, y + 10);
@@ -5853,19 +5890,69 @@ static void drawFishScene() {
   const int L = 40, T = 108, W = 386, H = 250;     // the window
   const int WATER_Y = 262;
   uint32_t now = millis();
-  gfx->fillRoundRect(L, T, W, H, 14, C565(150, 205, 240));                   // sky
-  gfx->fillCircle(L + W - 52, T + 40, 18, 0xFEA0);                            // sun
-  gfx->fillCircle(L + 230, T + 34, 11, 0xFFFF); gfx->fillCircle(L + 248, T + 30, 14, 0xFFFF); gfx->fillCircle(L + 268, T + 36, 10, 0xFFFF);
-  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, C565(50, 120, 190)); // water
-  gfx->fillRect(L, WATER_Y, W, 16, C565(50, 120, 190));
-  for (int i = 0; i < 6; i++) {                                               // little waves
-    int wx = L + 150 + i * 42 + (int)((now / 120) % 20) - 10, wy = WATER_Y + 20 + (i % 3) * 22;
-    gfx->drawFastHLine(wx, wy, 14, C565(120, 180, 230));
+  // Original, lightweight park-inspired scenery: distant I-210 bridge,
+  // wooded shoreline and sunset reflected on Prien Lake. This is an artistic
+  // interpretation, not a survey or photo of a specific fishing platform.
+  const uint16_t skyTop = C565(102, 157, 189), skyLow = C565(253, 207, 152);
+  const uint16_t waterFar = C565(108, 153, 160), waterNear = C565(37, 89, 112);
+  gfx->fillRoundRect(L, T, W, H, 14, skyTop);
+  for (int y = T + 14; y < WATER_Y; y += 7) {
+    const int h = WATER_Y - y < 7 ? WATER_Y - y : 7;
+    gfx->fillRect(L + 1, y, W - 2, h, lerp565(skyTop, skyLow, y - T, WATER_Y - T));
   }
-  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(160, 110, 60));                 // the dock
-  for (int i = 0; i < 5; i++) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y - 2, 12, C565(110, 70, 35));
-  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(110, 70, 35));
-  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(110, 70, 35));
+  gfx->fillCircle(331, 167, 25, C565(250, 224, 169));
+  gfx->fillCircle(331, 167, 18, C565(255, 241, 186));
+  for (int i = 0; i < 6; ++i) {
+    const int x = L + 32 + i * 58;
+    gfx->fillRoundRect(x, T + 36 + (i % 3) * 14, 42 + (i % 2) * 21, 4, 2, C565(220, 221, 211));
+  }
+  const uint16_t distant = C565(84, 114, 115);
+  gfx->fillRect(L + 1, WATER_Y - 12, W - 2, 12, distant);
+  for (int i = 0; i < 22; ++i) {
+    const int x = L + 8 + i * 17;
+    const int r = 8 + (i * 7) % 10;
+    gfx->fillCircle(x, WATER_Y - 13 - (i % 3) * 3, r, distant);
+  }
+  // Stylized high bridge silhouette on the far side of the lake.
+  const uint16_t bridge = C565(70, 88, 91);
+  gfx->drawLine(174, 243, 240, 220, bridge);
+  gfx->fillRect(240, 219, 78, 4, bridge);
+  gfx->drawLine(317, 220, 412, 243, bridge);
+  gfx->drawLine(174, 246, 240, 223, bridge);
+  gfx->drawLine(317, 223, 412, 246, bridge);
+  for (int i = 0; i < 5; ++i) {
+    int x = 192 + 49 * i;
+    int y = x < 240 ? 244 - (x - 174) * 23 / 66 :
+            x < 318 ? 221 : 221 + (x - 318) * 23 / 94;
+    gfx->fillRect(x, y, 3, WATER_Y - y, bridge);
+  }
+  // Foreground shade trees frame the shoreline, away from the hook target.
+  gfx->fillRect(L + 17, T + 46, 7, WATER_Y - T - 46, C565(85, 80, 57));
+  for (int i = 0; i < 7; ++i)
+    gfx->fillCircle(L + 17 + i * 12, T + 45 + (i % 3) * 9, 15, C565(62, 100 + (i % 3) * 10, 73));
+  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, waterNear);
+  for (int y = WATER_Y; y < T + H - 14; y += 6) {
+    const int h = T + H - 14 - y < 6 ? T + H - 14 - y : 6;
+    gfx->fillRect(L + 1, y, W - 2, h, lerp565(waterFar, waterNear, y - WATER_Y, H - (WATER_Y - T)));
+  }
+  // Deterministic moving reflections, no game RNG consumed by rendering.
+  for (int i = 0; i < 23; ++i) {
+    const int wy = WATER_Y + 5 + (i * 13) % 75;
+    const int wx = L + 155 + (i * 41 + (int)(now / 150 % 15)) % 190;
+    const int len = 6 + (i * 9) % 22;
+    gfx->drawFastHLine(wx, wy, len, lerp565(waterFar, skyLow, i % 4, 5));
+  }
+  for (int i = 0; i < 9; ++i) {
+    int len = 10 + (i * 13) % 40;
+    gfx->drawFastHLine(331 - len / 2, WATER_Y + 4 + i * 6, len, C565(205, 184, 141));
+  }
+  // Keep the original dock/platform footprint and creature/rod coordinates.
+  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(153, 122, 87));
+  gfx->fillRect(L, WATER_Y - 2, 150, 2, C565(212, 178, 131));
+  gfx->fillRect(L, WATER_Y + 7, 150, 3, C565(86, 70, 53));
+  for (int i = 0; i < 5; ++i) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y, 7, C565(105, 82, 58));
+  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(86, 70, 53));
+  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(86, 70, 53));
   gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
 
   int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
@@ -5922,13 +6009,23 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
   gfx->fillRoundRect(x + 4, y + 36, 92, 48, 6, wood);                            // body
   gfx->fillRect(x + 4, y + 52, 92, 5, dark);
   gfx->drawRoundRect(x + 4, y + 36, 92, 48, 6, UI_INK);
+  // Decorative grain and highlights, within the existing chest footprint.
+  for (int k = 0; k < 3; ++k) gfx->drawFastHLine(x + 31, y + 57 + 8*k, 38, dark);
   gfx->fillRect(x + 20, y + 36, 8, 48, gold); gfx->fillRect(x + 72, y + 36, 8, 48, gold);   // straps
+  gfx->fillRect(x + 21, y + 40, 2, 40, C565(255, 239, 178));
+  gfx->fillRect(x + 73, y + 40, 2, 40, C565(255, 239, 178));
   if (!open) {
     gfx->fillRoundRect(x + 4, y + 16, 92, 26, 12, wood);                           // lid, shut
     gfx->drawRoundRect(x + 4, y + 16, 92, 26, 12, UI_INK);
     gfx->fillRect(x + 20, y + 18, 8, 22, gold); gfx->fillRect(x + 72, y + 18, 8, 22, gold);
     gfx->fillRoundRect(x + 42, y + 34, 16, 16, 3, gold);                           // lock
-    gfx->fillCircle(x + 50, y + 41, 3, UI_INK);
+    // Pokeball-inspired clasp: original geometric emblem, not a new creature.
+    gfx->fillCircle(x + 50, y + 40, 8, UI_WHITE);
+    gfx->fillRoundRect(x + 43, y + 33, 14, 7, 3, C565(188, 54, 48));
+    gfx->drawCircle(x + 50, y + 40, 8, UI_INK);
+    gfx->drawFastHLine(x + 43, y + 40, 15, UI_INK);
+    gfx->fillCircle(x + 50, y + 40, 3, UI_WHITE);
+    gfx->drawCircle(x + 50, y + 40, 3, UI_INK);
   } else {
     gfx->fillRoundRect(x + 8, y + 30, 84, 12, 4, 0x2104);                          // the dark inside
     gfx->fillRoundRect(x + 4, y - 4, 92, 22, 10, wood);                            // lid, tipped back
@@ -6004,6 +6101,10 @@ void renderAct() {
   }
   if (actState == 1) {                         // fishing
     drawFishScene();
+    gfx->setTextSize(2);
+    gfx->setTextColor(UI_INK);
+    gfx->setCursor(CX - 90, 56);
+    gfx->print("PRIEN LAKE PARK");
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     const char *head = fishPhase == 0 ? "tap to cast" : fishPhase == 1 ? "wait for a bite..." : fishPhase == 2 ? "TAP NOW!" : actMsg;
@@ -6034,7 +6135,19 @@ void renderAct() {
     gfx->flush();
     return;
   }
-  // treasure
+  // Treasure cavern: original decorative scenery behind the same three
+  // selectable chests. Keep the header, coin labels and back target clear.
+  const uint16_t stone = C565(98, 91, 119);
+  const uint16_t glow = C565(231, 222, 191);
+  gfx->fillRoundRect(48, 116, 370, 243, 24, C565(180, 173, 187));
+  for (int y = 138; y < 335; y += 12)
+    gfx->fillRect(60, y, 346, 12, lerp565(stone, glow, y - 138, 197));
+  for (int i = 0; i < 7; ++i) {
+    const int x = 69 + i * 51;
+    gfx->fillTriangle(x, 120, x + 24, 120, x + 13, 143 + (i * 17) % 21, stone);
+    gfx->fillTriangle(x, 343, x + 20, 343, x + 9, 312 + (i * 7) % 16, C565(147, 140, 162));
+  }
+  gfx->fillRoundRect(62, 225, 342, 88, 16, glow);
   gfx->setCursor(CX - 54, 56);
   gfx->print("TREASURE");
   gfx->setTextSize(1);
@@ -6511,7 +6624,6 @@ void keyboardTap(int16_t x, int16_t y) {
 
 #define GAL_X 73
 #define GAL_Y 84
-#define GAL_CELL 80
 
 // dibuja una miniatura centrada en su celda; sil=true la pinta en tinta
 void drawThumb(const uint8_t *b, int x, int y, int s, bool sil) {
@@ -6520,14 +6632,10 @@ void drawThumb(const uint8_t *b, int x, int y, int s, bool sil) {
   const uint8_t *d = pal + n * 2;
   int ox = x + (GAL_CELL - w * s) / 2;
   int oy = y + (GAL_CELL - h * s) / 2;
-  for (int r = 0; r < h; r++) {
-    for (int c = 0; c < w; c++) {
-      uint8_t idx = d[r * w + c];
-      if (idx == 0xFF) continue;
-      uint16_t col = sil ? INK_K : (uint16_t)(pal[idx * 2] | (pal[idx * 2 + 1] << 8));
-      gfx->fillRect(ox + c * s, oy + r * s, s, s, col);
-    }
-  }
+  forSpriteRuns(d, w, h, sil, [&](int x, int y, int len, uint8_t idx) {
+    uint16_t col = sil ? INK_K : (uint16_t)(pal[idx * 2] | (pal[idx * 2 + 1] << 8));
+    gfx->fillRect(ox + x * s, oy + y * s, len * s, s, col);
+  });
 }
 
 void renderGallery() {
@@ -6536,6 +6644,15 @@ void renderGallery() {
     gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
     const DexEntry &d = DEX_TBL[galleryDetail];
     bool reg = pet.isRegistered(galleryDetail);
+    // Only registered species reveal their accent color; unknown species
+    // keep the original silhouette and mystery label.
+    const uint16_t accent = reg ? d.accent : UI_TRACK;
+    gfx->fillRoundRect(62, 104, 342, 278, 24, UI_WHITE);
+    gfx->drawRoundRect(62, 104, 342, 278, 24, lerp565(UI_INK, accent, 3, 4));
+    gfx->fillCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 7, 8));
+    gfx->drawCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 3, 4));
+    gfx->fillRoundRect(CX - 72, 301, 144, 15, 7, lerp565(accent, UI_WHITE, 4, 5));
+    gfx->fillRoundRect(CX - 52, 303, 104, 7, 3, lerp565(accent, UI_WHITE, 2, 3));
     char head[24];
     snprintf(head, sizeof(head), "N.%03d %s%s", galleryDetail,
              pet.isShinyRegistered(galleryDetail) ? "*" : "", reg ? d.name : "???");
@@ -6545,13 +6662,27 @@ void renderGallery() {
     gfx->setTextSize(gts);
     gfx->setCursor(CX - glen * (gts == 3 ? 9 : 6), gts == 3 ? 56 : 60);
     gfx->print(head);
-    if (galleryPmd.loaded) {
+    if (reg && galleryPortrait.view.pixels) {
+      const int left = CX - galleryPortrait.view.w / 2;
+      const int top = 300 - galleryPortrait.view.h;
+      galleryPortrait.view.draw([&](int x, int y, int len, uint16_t *row) {
+        gfx->draw16bitRGBBitmap(left + x, top + y, row, len, 1);
+      });
+    } else if (galleryPmd.loaded) {
       // animado y a color si esta registrado; silueta estatica si no (estilo "?")
       drawPmdActM(galleryPmd, PMD_IDLE, CX, 300, reg ? millis() : 0, true, !reg, 6);
     } else {
       const uint8_t *t = thumbs.get(galleryDetail);
-      if (t) drawThumb(t, CX - GAL_CELL, 135, 4, !reg);
+      if (t) {
+        // Center the real thumbnail and keep its feet over the stage.
+        int sc = 4;
+        while (sc > 1 && (t[0] * sc > 210 || t[1] * sc > 172)) --sc;
+        drawThumb(t, CX - GAL_CELL / 2,
+                  300 - (GAL_CELL + t[1] * sc) / 2, sc, !reg);
+      }
     }
+    gfx->fillRoundRect(CX - 65, 390, 130, 42, 16, UI_WHITE);
+    gfx->drawRoundRect(CX - 65, 390, 130, 42, 16, UI_INK);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - strlen(T(S_DETAIL_BACK)) * 6, 408);
@@ -6581,6 +6712,13 @@ void renderGallery() {
       int16_t dex = GAL_LO + galleryPage * GAL_PER_PAGE + r * 4 + c;
       if (dex > GAL_HI || dex > DEX_COUNT) break;
       int x = GAL_X + c * GAL_CELL, y = GAL_Y + r * GAL_CELL;
+      // Stay within the existing cell and let the round panel clip only the
+      // same peripheral cells as before. The cards add no new touch targets.
+      const bool known = pet.isRegistered(dex);
+      const uint16_t card = known ? lerp565(DEX_TBL[dex].accent, UI_WHITE, 7, 8)
+                                  : lerp565(UI_TRACK, UI_WHITE, 5, 6);
+      gfx->fillRoundRect(x + 3, y + 3, GAL_CELL - 6, GAL_CELL - 6, 10, card);
+      gfx->drawRoundRect(x + 3, y + 3, GAL_CELL - 6, GAL_CELL - 6, 10, UI_TRACK);
       const uint8_t *t = thumbs.get(dex);
       if (t) {
         drawThumb(t, x, y, 2, !pet.isRegistered(dex));
@@ -6615,21 +6753,28 @@ void renderGallery() {
 void galleryTap(int16_t x, int16_t y) {
   if (galleryDetail) {  // volver a la rejilla
     galleryDetail = 0;
-    galleryPmd.unload();
+    unloadGalleryArt();
     galleryDirty = true;
     return;
   }
   if (y < 72) {  // tocar la cabecera = salir
     galleryOpen = false;
-    galleryPmd.unload();
+    unloadGalleryArt();
     return;
   }
+  // C++ truncates negative division toward zero: guard the outer edges
+  // before dividing or taps just above/left of the grid select cell zero.
+  if (x < GAL_X || y < GAL_Y || x >= GAL_X + 4 * GAL_CELL || y >= GAL_Y + 4 * GAL_CELL) return;
   int c = (x - GAL_X) / GAL_CELL, r = (y - GAL_Y) / GAL_CELL;
   if (c < 0 || c > 3 || r < 0 || r > 3) return;
   int16_t dex = GAL_LO + galleryPage * GAL_PER_PAGE + r * 4 + c;
   if (dex > GAL_HI || dex > DEX_COUNT) return;
   galleryDetail = dex;
-  galleryPmd.load(dex, pet.isShinyRegistered(dex));
+  unloadGalleryArt();
+  const bool shiny = pet.isShinyRegistered(dex);
+  // Never expose an unregistered species via the optional art path.
+  if (!pet.isRegistered(dex) || !galleryPortrait.load(dex, shiny))
+    galleryPmd.load(dex, shiny);
 }
 
 void drawBattery() {
@@ -7030,14 +7175,9 @@ void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool
   // anclar por los pies (a.base), no por el alto del lienzo: asi las acciones
   // con padding distinto (Hurt, Eat...) quedan todas a la misma altura de suelo
   int x0 = cx - a.w * s / 2, y0 = groundY - (a.base ? a.base : a.h) * s;
-  for (int r = 0; r < a.h; r++) {
-    const uint8_t *row = fr + r * a.w;
-    for (int c = 0; c < a.w; c++) {
-      uint8_t idx = row[c];
-      if (idx == 0xFF) continue;
-      gfx->fillRect(x0 + c * s, y0 + r * s, s, s, sil ? INK_K : m.pal[idx]);
-    }
-  }
+  forSpriteRuns(fr, a.w, a.h, sil, [&](int x, int y, int len, uint8_t idx) {
+    gfx->fillRect(x0 + x * s, y0 + y * s, len * s, s, sil ? INK_K : m.pal[idx]);
+  });
 }
 void drawPmdAct(uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {
   drawPmdActM(pmd, actId, cx, groundY, t, loop, sil, maxS);

@@ -1,0 +1,81 @@
+name: TamaPoke visual pilot verification
+
+# This isolated workflow checks the draft battle branch only. It never publishes
+# installer files, pushes to the repository, or flashes any device.
+on:
+  pull_request:
+    branches: [codex/pokemon-visual-pilot]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'TamaPoke.ino'
+      - '*.h'
+      - 'sdmon.cpp'
+      - 'tools/emu/**'
+      - 'tools/pack_portrait.py'
+      - 'tools/unpack_emulator_assets.py'
+      - '.github/workflows/battle-visual-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: battle-visual-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install emulator dependency
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Restore existing sprite test fixtures
+        run: python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
+      - name: Run real-source host tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/battle-shots"
+          WALK_SHOTS="$RUNNER_TEMP/battle-shots" bash tools/emu/tests/run.sh
+      - name: Render battle and Pokedex screenshots
+        run: |
+          mkdir -p "$RUNNER_TEMP/battle-shots"
+          EMU="$PWD/tools/emu/tamapoke-emu"
+          cd "$RUNNER_TEMP/battle-shots"
+          for screen in btlmenu btlmoves btlswitch battleanim gallery gallerydetail; do
+            rm -f tamapoke.nvs
+            "$EMU" --shot "$screen" --lvl 30 --out "$screen.ppm"
+            test -s "$screen.ppm"
+          done
+          test -s fishing.ppm
+          test -s gallerydetail.ppm
+          test -s treasure.ppm
+          test -s treasure__opened_.ppm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battle-visual-emulator-screens
+          path: ${{ runner.temp }}/battle-shots/*.ppm
+          retention-days: 7
+
+  firmware:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install pinned core and libraries
+        run: |
+          arduino-cli config init --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.10
+          arduino-cli lib install "GFX Library for Arduino@1.6.9" SensorLib@0.5.1 XPowersLib@0.3.3 U8g2@2.36.19
+      - name: Compile without publishing
+        run: |
+          mkdir -p "$RUNNER_TEMP/TamaPoke"
+          tar --exclude=.git -cf - . | tar -xf - -C "$RUNNER_TEMP/TamaPoke"
+          arduino-cli compile --warnings=all \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+            --output-dir "$RUNNER_TEMP/firmware-check" "$RUNNER_TEMP/TamaPoke"
+          ls -lh "$RUNNER_TEMP/firmware-check"

@@ -16,6 +16,8 @@
 #include "sdmon.h"
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
 uint32_t g_seed=7; FakeSerial Serial; FakeESP ESP; FakeWire Wire;
 volatile int g_touchX=0,g_touchY=0; volatile bool g_touchDown=false;
 uint32_t millis(){return 0;}
@@ -27,7 +29,10 @@ static int bad=0;
 static void ck(bool ok,const char*w){printf("%s  %s\n",ok?"PASS":"FAIL",w); if(!ok)bad++;}
 
 int main(){
-  emuSetSpriteDir(SPRITE_DIR);
+  // Exercise long checkout paths even on short local working directories.
+  const auto dir = std::filesystem::current_path() / std::string(100, 'p');
+  std::filesystem::create_directory_symlink(SPRITE_DIR, dir);
+  emuSetSpriteDir(dir.c_str());
 
   // the exact creature that was reported, and the exact one it turned into
   {

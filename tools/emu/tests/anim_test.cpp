@@ -14,6 +14,8 @@ int FakeSerial::available(){return 0;}
 String FakeSerial::readStringUntil(char){return String("");}
 void setup(); void render();
 extern Pet pet;
+extern Arduino_Canvas *gfx;
+extern uint8_t btlMenu;
 extern bool battleOpen, btlOver;
 extern Combatant btlYou, btlFoe;
 extern uint8_t btlMsgCount;
@@ -36,6 +38,32 @@ int main(){
   ck(battleOpen, "battle starts");
   ck(btlHpShown[0]==btlYou.maxHp && btlHpShown[1]==btlFoe.maxHp,
      "the eased bars start full");
+
+  // Read the actual rendered framebuffer, not a separate approximation of
+  // the arena painter. These unobstructed coordinates lie on the round panel.
+  gfx->frameReady = false;
+  render();
+  ck(gfx->frameReady, "battle visual frame flushes");
+  const uint16_t *frame = gfx->buffer();
+  const uint16_t farFloor = frame[267 * 466 + 233];
+  const uint16_t nearFloor = frame[400 * 466 + 233];
+  ck(farFloor != nearFloor, "arena ground is shaded instead of one flat color");
+  ck(((nearFloor >> 11) & 31) > ((farFloor >> 11) & 31),
+     "foreground ground is brighter than distant ground");
+  ck(frame[254 * 466 + 233] != farFloor,
+     "horizon separator is visible");
+  ck(frame[279 * 466 + 120] == RGB565_WHITE,
+     "FIGHT control retains its highlight");
+
+  // The added rendering must not silently change the actual combatant IDs
+  // or turn/menu state. The normal HP animation checks below cover HP easing.
+  const int16_t youDex = btlYou.dex, foeDex = btlFoe.dex;
+  const uint16_t youHp = btlYou.hp, foeHp = btlFoe.hp;
+  const uint8_t menuBefore = btlMenu;
+  render();
+  ck(btlYou.dex == youDex && btlFoe.dex == foeDex &&
+     btlYou.hp == youHp && btlFoe.hp == foeHp && btlMenu == menuBefore,
+     "battle visual refresh preserves species, actual HP and menu state");
 
   // drop the foe's health and confirm the bar walks down instead of jumping
   btlFoe.hp = btlFoe.maxHp / 2;

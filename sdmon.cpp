@@ -93,6 +93,22 @@ void PmdMon::unload() {
   loaded = false;
 }
 
+bool SdPortrait::load(int16_t dexNum, bool shiny) {
+  unload();
+  if (!sdReady || dexNum < 1 || dexNum > DEX_COUNT) return false;
+  char path[32];
+  snprintf(path, sizeof(path), "/mons/a%s%03u.tpa", shiny ? "s" : "", (unsigned)dexNum);
+  File f = SD_MMC.open(path, FILE_READ);
+  if (!f) return false;
+  const size_t n = f.size();
+  if (n < PortraitView::Header || n > PortraitView::MaxBytes) { f.close(); return false; }
+  blob = (uint8_t *)ps_malloc(n);
+  const bool ok = blob && f.read(blob, n) == n && view.parse(blob, n, dexNum, shiny);
+  f.close();
+  if (!ok) unload();
+  return ok;
+}
+
 bool SdThumbs::load() {
   if (!sdReady) return false;
   File f = SD_MMC.open("/mons/thumbs.bin", FILE_READ);
