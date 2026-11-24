@@ -9,7 +9,7 @@ Continue the owner's approved, recognizable-Pokémon visual refresh without chan
 ## What changed
 
 - Replaced the plain lower battle band with a low-cost RGB565 ground gradient and narrow horizon separator.
-- Added elliptical-looking, two-tone ground shadows using rounded rectangles anchored to each combatant's real baseline: PMD sprites use `sy + 78`; the thumbnail fallback uses `sy + 48`. Shadows stay fixed while attack/hurt sprites lunge or shake.
+- Added elliptical-looking, two-tone ground shadows using rounded rectangles anchored to each combatant's real baseline: PMD sprites use `sy + 78`; the thumbnail fallback derives its center and lower edge from `GAL_CELL` and the actual bitmap height; no sprite means no shadow. Shadows stay fixed while attack/hurt sprites lunge or shake.
 - Added a restrained accent marker and depth shadow to the existing name/HP panel. Accent is read from the existing canonical species table.
 - Reused one decorative button painter across battle menus, keeping **all existing button dimensions, text, switch/run/move states, and hit areas**.
 
@@ -32,3 +32,11 @@ This uses primitive drawing calls; there are no new images, IDs, rules, allocati
 ## Next digital milestone
 
 Produce a real-source emulator screenshot for a canonical Pokémon such as Bulbasaur in battle, confirm no controls clip on the circular panel, run the host walkthrough tests, then an ESP32-S3 build with OPI PSRAM and size/headroom review. Only after that should the visual system be adapted to the Pokédex and other screens. Richer creature art needs a traceable licensed source per species and should not invent or alter Pokémon identities.
+
+## Follow-up verification work
+
+- `2c8cb8b`: corrected fallback shadow placement after reading the actual `drawThumb` implementation; the previous fixed 48px offset did not account for the 80px centering cell or variable thumbnail heights.
+- `3e0e91d`: extended `anim_test.cpp` with real-framebuffer checks for floor gradient, horizon, button highlight and unchanged actual combatant IDs, HP and menu state across rendering. Existing HP easing checks remain intact.
+- `892954a`: added an isolated draft-branch workflow `.github/workflows/battle-visual-check.yml` that installs SDL2, runs existing host suites, exports four emulator screenshots, and independently compiles with the same pinned ESP32 target and libraries as the existing firmware build. It does not update the web installer or publish flash files. Workflow triggers are scoped to the battle branch and relevant code/test/workflow changes. No results have been verified yet; available commit checks showed no pull-request-triggered run or combined status at the time of inspection. Local full compile could not run because the container has no Arduino CLI/SDL2 and cannot resolve GitHub for a checkout.
+
+Do not confuse the new tests being committed with passing tests. The next evidence is a completed host/firmware run and review of the real screenshots.
