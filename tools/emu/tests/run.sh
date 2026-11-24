@@ -76,6 +76,7 @@ for src in "$HERE"/*_test.cpp; do
   [ "$name" = sprite_fit_test ] && srcs=()
   [ "$name" = training_scenes_test ] && srcs=()
   [ "$name" = textured_scenes_test ] && srcs=()
+  [ "$name" = painted_scenes_test ] && srcs=()
   # every test starts from a clean NVS so one cannot leak state into the next
   rm -f "$OUT/tamapoke.nvs"
   if ! g++ "${FLAGS[@]}" -o "$OUT/$name" "$src" "${srcs[@]}" "${extra[@]}" 2>"$OUT/$name.log"; then
