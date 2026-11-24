@@ -4,6 +4,8 @@ on:
     branches: [codex/tamapoke-battle-scene-polish]
     paths:
       - 'tools/render_glb_walk.py'
+      - 'tools/import_local_glb.py'
+      - 'tools/merge_walk_pilot.py'
       - 'tools/make_renderer_fixture.py'
       - '.github/workflows/glb-renderer-check.yml'
 permissions:
@@ -45,6 +47,13 @@ jobs:
           frames[0].save(root/"fixture.gif",save_all=True,append_images=frames[1:],duration=80,loop=0)
           print("PASS: original skeletal GLB to 12 transparent frames and TPK2")
           PY
+      - name: Test local importer with original game sprite
+        run: |
+          /usr/bin/python3 tools/unpack_emulator_assets.py
+          /usr/bin/python3 tools/import_local_glb.py "$RUNNER_TEMP/fixture.glb" --dex 1 --clip fixture_walk --original tools/sdcard/mons/p001.bin --out "$RUNNER_TEMP/local-import" --rights "Original engineering fixture"
+          test -s "$RUNNER_TEMP/local-import/p001.bin"
+          test -s "$RUNNER_TEMP/local-import/provenance.json"
+          test -s "$RUNNER_TEMP/local-import/walk.gif"
       - uses: actions/upload-artifact@v4
         with:
           name: original-renderer-fixture
