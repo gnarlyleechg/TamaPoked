@@ -91,6 +91,26 @@ void PmdMon::unload() {
   loaded = false;
 }
 
+bool SdPortrait::load(int16_t dexNum, bool shiny) {
+  unload();
+  if (!sdReady || dexNum < 1 || dexNum > DEX_COUNT) return false;
+  char name[32];
+  snprintf(name, sizeof(name), "/a%s%03u.tpa", shiny ? "s" : "", (unsigned)dexNum);
+  const std::string path = g_spriteDir + name;
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) return false;
+  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+  const long n = ftell(f);
+  if (n < (long)PortraitView::Header || n > (long)PortraitView::MaxBytes ||
+      fseek(f, 0, SEEK_SET) != 0) { fclose(f); return false; }
+  blob = (uint8_t *)malloc(n);
+  const bool ok = blob && fread(blob, 1, n, f) == (size_t)n &&
+                  view.parse(blob, n, dexNum, shiny);
+  fclose(f);
+  if (!ok) unload();
+  return ok;
+}
+
 bool SdThumbs::load() {
   uint32_t size = 0;
   data = slurp(g_spriteDir + "/thumbs.bin", &size);
