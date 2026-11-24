@@ -28,7 +28,7 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil libgl1 libxi6 libxrender1 libxxf86vm1
+          sudo apt-get install -y python3-pil libsdl2-dev libgl1 libxi6 libxrender1 libxxf86vm1
           if [ ! -x "$RUNNER_TEMP/blender-4.2.0-linux-x64/blender" ]; then
             curl --fail --location --retry 2 --retry-all-errors https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz" || curl --fail --location --retry 2 https://mirrors.ocf.berkeley.edu/blender/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
             tar -xf "$RUNNER_TEMP/blender.tar.xz" -C "$RUNNER_TEMP"
@@ -59,11 +59,32 @@ jobs:
           PY
       - name: Test local importer with original game sprite
         run: |
-          /usr/bin/python3 tools/unpack_emulator_assets.py
+          /usr/bin/python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
           /usr/bin/python3 tools/import_local_glb.py "$RUNNER_TEMP/fixture.glb" --dex 1 --clip fixture_walk --original tools/sdcard/mons/p001.bin --out "$RUNNER_TEMP/local-import" --rights "Original engineering fixture"
           test -s "$RUNNER_TEMP/local-import/p001.bin"
           test -s "$RUNNER_TEMP/local-import/provenance.json"
           test -s "$RUNNER_TEMP/local-import/walk.gif"
+      - name: Render imported fixture in actual living room
+        run: |
+          ROOT="$PWD"
+          bash tools/emu/tests/run.sh
+          EMU="$ROOT/tools/emu/tamapoke-emu"
+          cp -a tools/sdcard/mons "$RUNNER_TEMP/override-mons"
+          cp "$RUNNER_TEMP/local-import/p001.bin" "$RUNNER_TEMP/override-mons/p001.bin"
+          cd "$RUNNER_TEMP/frames"
+          "$EMU" --sprites "$ROOT/tools/sdcard/mons" --shot homewalkpilot --dex 1 --out baseline
+          rm -f tamapoke.nvs
+          "$EMU" --sprites "$RUNNER_TEMP/override-mons" --shot homewalkpilot --dex 1 --out imported
+          /usr/bin/python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          a=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("imported-*.ppm"))]
+          b=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("baseline-*.ppm"))]
+          assert len(a)==len(b)==12
+          assert any(x.tobytes()!=y.tobytes() for x,y in zip(a,b))
+          a[0].save("imported-living-room.gif",save_all=True,append_images=a[1:],duration=80,loop=0)
+          print("PASS: local override changes actual living-room frames")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: original-renderer-fixture
