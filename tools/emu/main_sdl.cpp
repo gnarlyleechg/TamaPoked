@@ -400,6 +400,20 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     }
     if (!strcmp(screen, "partyfull")) partyPick = true;
   }
+  if (!strcmp(screen, "homewalkpilot")) {
+    extern void emuWalkPilot(int, bool, uint32_t);
+    pet.dbgHatchAs(1, false);
+    while (pet.hasLearnOffer()) pet.declineLearn();
+    pet.ceremony = 0; pet.sleeping = false;
+    loop();
+    for (int i=0;i<12;i++) {
+      emuWalkPilot(280-i*3, false, i*80);
+      render();
+      char name[512]; snprintf(name,sizeof(name),"%s-%02d.ppm",out,i);
+      writePPM(name);
+    }
+    return 0;
+  }
   render();
   writePPM(out);
   return 0;
