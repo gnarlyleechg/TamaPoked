@@ -65,6 +65,7 @@ sips -s format png shot.ppm --out shot.png     # macOS; or use ImageMagick
 For repeatable animation sequences, use `--shot starterwalk`, `startereat`,
 `startersleep`, or `starterbattle` with a species ID such as `--dex 25`.
 Use `--out pikachu` to write 24 numbered frames at 100 ms intervals.
+Add `--shiny` to capture the species' shiny variant in these sequences.
 Restore the bundled sprites with `tools/unpack_emulator_assets.py` first.
 
 ## How it works

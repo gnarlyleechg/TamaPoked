@@ -59,6 +59,14 @@ provided geographic reference. No third-party photo or character artwork was
 used to make the background. Run `python tools/pack_fishing_art.py` to regenerate
 its RGB565 palette and indices.
 
+## Woodland arena and treasure cavern
+
+`tools/activity_art/woodland-arena.png` and
+`tools/activity_art/treasure-cavern.png` are original generated environments
+for TamaPoke. They contain no third-party character art. Run
+`python tools/pack_scene_art.py` to regenerate the indexed RGB565 data in
+`scene_backs.h`.
+
 ## Software / hardware
 
 | Component | Author / source |

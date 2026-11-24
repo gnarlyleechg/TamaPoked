@@ -25,6 +25,7 @@
 #include "backs.h"
 #include "home_backs.h"
 #include "fishing_back.h"
+#include "scene_backs.h"
 #include "sprite_runs.h"
 #include "sprite_fit.h"
 #include "badges.h"
@@ -3508,6 +3509,23 @@ void renderMovePick() {
 
 // ---------- battle ----------
 
+// Stream indexed scenery from flash in two scanlines. The canvas is the
+// only full-size buffer required for these scenes.
+static void drawIndexedBackdrop(int left, int top, int w, int h,
+                                const uint8_t *pixels, const uint16_t *palette) {
+  const int width = w * 2;
+  uint16_t rows[466 * 2];
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      const uint8_t index = pgm_read_byte(pixels + y * w + x);
+      const uint16_t color = pgm_read_word(palette + index);
+      rows[x * 2] = rows[x * 2 + 1] = color;
+    }
+    memcpy(rows + width, rows, width * sizeof(uint16_t));
+    gfx->draw16bitRGBBitmap(left, top + y * 2, rows, width, 2);
+  }
+}
+
 // Draws a battle backdrop scaled 2x. Emitted as runs of identical indices
 // rather than a write per pixel: this is flat pixel art with long horizontal
 // runs, and 240x112 at 2x would otherwise be 26,880 fillRect calls a frame.
@@ -3536,7 +3554,12 @@ static void drawBattleBack() {
   if (dex < 1 || dex > DEX_COUNT) { gfx->fillCircle(CX, CY, 231, UI_BG_DAY); return; }
   uint8_t bi = DEX_TBL[dex].biome;
   if (bi >= BACK_BIOMES) bi = 0;
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
+  const int hour = sceneHour();
+  const bool night = hour < 6 || hour >= 20;
+  if (!night && (bi == 0 || bi == 2)) {
+    drawIndexedBackdrop(0, 0, WOODLAND_W, WOODLAND_H, WOODLAND_PIXELS, WOODLAND_PALETTE);
+    return;
+  }
   drawBack(BACKS[bi][night ? 1 : 0], 30);
 }
 
@@ -4004,8 +4027,8 @@ static void btlDrawButton(int x, int y, int w, int h, uint16_t color) {
 
 // Keep the arena shadow tied to the base of the actual sprite frame.
 static void btlDrawGroundShadow(int footX, int footY) {
-  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
-  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
+  gfx->fillRoundRect(footX - 44, footY - 3, 88, 10, 5, C565(76, 81, 53));
+  gfx->fillRoundRect(footX - 28, footY - 2, 56, 6, 3, C565(49, 55, 37));
 }
 
 static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t who) {
@@ -5934,23 +5957,6 @@ static void fishLine(int x0, int y0, int x1, int y1, int sag) {   // a drooping 
     px = x; py = y;
   }
 }
-static void drawFishingBackdrop(int left, int top) {
-  // Expand two identical scanlines at a time. Keep the static art in flash
-  // and leave PSRAM available for the canvas, living room and loaded sprites.
-  constexpr int width = FISH_ART_W * 2;
-  uint16_t rows[width * 2];
-  for (int y = 0; y < FISH_ART_H; ++y) {
-    for (int x = 0; x < FISH_ART_W; ++x) {
-      uint8_t index = pgm_read_byte(FISH_ART_PIXELS + y * FISH_ART_W + x);
-      uint16_t color = pgm_read_word(FISH_ART_PALETTE + index);
-      int leftPixel = x * 2;
-      rows[leftPixel] = rows[leftPixel + 1] = color;
-    }
-    memcpy(rows + width, rows, width * sizeof(uint16_t));
-    gfx->draw16bitRGBBitmap(left, top + y * 2, rows, width, 2);
-  }
-}
-
 static void drawFishingRipple(int x, int y, int radius, uint16_t color) {
   // Flatten the ring to follow the perspective of the lake surface.
   int height = radius / 4;
@@ -5966,7 +5972,7 @@ static void drawFishScene() {
   const int L = 40, T = 108;
   const int WATER_Y = 262;
   uint32_t now = millis();
-  drawFishingBackdrop(L, T);
+  drawIndexedBackdrop(L, T, FISH_ART_W, FISH_ART_H, FISH_ART_PIXELS, FISH_ART_PALETTE);
   gfx->drawRect(L, T, FISH_ART_W * 2, FISH_ART_H * 2, UI_INK);
 
   int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
@@ -6023,9 +6029,15 @@ static void drawFishScene() {
 // ---- treasure chests ----
 static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   // 100 x 90 box
   uint16_t wood = C565(150, 100, 50), dark = C565(100, 62, 28), gold = 0xFEA0;
-  if (chosen) gfx->fillRoundRect(x - 6, y - 8, 112, 104, 12, CH_LAST);           // highlight behind the one picked
+  gfx->fillRoundRect(x + 2, y + 75, 96, 15, 7, C565(51, 34, 25));
+  if (chosen) {
+    gfx->drawRoundRect(x, y - 8, 100, 100, 10, gold);
+    gfx->drawRoundRect(x - 2, y - 10, 104, 104, 12, gold);
+  }
   gfx->fillRoundRect(x + 4, y + 36, 92, 48, 6, wood);                            // body
-  gfx->fillRect(x + 4, y + 52, 92, 5, dark);
+  gfx->fillRoundRect(x + 9, y + 39, 82, 13, 4, C565(172, 111, 57));
+  gfx->fillRoundRect(x + 9, y + 72, 82, 8, 4, C565(119, 72, 43));
+  gfx->fillRect(x + 4, y + 52, 92, 3, dark);
   gfx->drawRoundRect(x + 4, y + 36, 92, 48, 6, UI_INK);
   // Decorative grain and highlights, within the existing chest footprint.
   for (int k = 0; k < 3; ++k) gfx->drawFastHLine(x + 31, y + 57 + 8*k, 38, dark);
@@ -6034,6 +6046,7 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
   gfx->fillRect(x + 73, y + 40, 2, 40, C565(255, 239, 178));
   if (!open) {
     gfx->fillRoundRect(x + 4, y + 16, 92, 26, 12, wood);                           // lid, shut
+    gfx->fillRoundRect(x + 10, y + 19, 80, 10, 5, C565(187, 123, 66));
     gfx->drawRoundRect(x + 4, y + 16, 92, 26, 12, UI_INK);
     gfx->fillRect(x + 20, y + 18, 8, 22, gold); gfx->fillRect(x + 72, y + 18, 8, 22, gold);
     gfx->fillRoundRect(x + 42, y + 34, 16, 16, 3, gold);                           // lock
@@ -6153,19 +6166,9 @@ void renderAct() {
     gfx->flush();
     return;
   }
-  // Treasure cavern: original decorative scenery behind the same three
-  // selectable chests. Keep the header, coin labels and back target clear.
-  const uint16_t stone = C565(98, 91, 119);
-  const uint16_t glow = C565(231, 222, 191);
-  gfx->fillRoundRect(48, 116, 370, 243, 24, C565(180, 173, 187));
-  for (int y = 138; y < 335; y += 12)
-    gfx->fillRect(60, y, 346, 12, lerp565(stone, glow, y - 138, 197));
-  for (int i = 0; i < 7; ++i) {
-    const int x = 69 + i * 51;
-    gfx->fillTriangle(x, 120, x + 24, 120, x + 13, 143 + (i * 17) % 21, stone);
-    gfx->fillTriangle(x, 343, x + 20, 343, x + 9, 312 + (i * 7) % 16, C565(147, 140, 162));
-  }
-  gfx->fillRoundRect(62, 225, 342, 88, 16, glow);
+  const uint16_t glow = C565(244, 224, 180);
+  drawIndexedBackdrop(48, 116, CAVERN_W, CAVERN_H, CAVERN_PIXELS, CAVERN_PALETTE);
+  gfx->drawRect(48, 116, CAVERN_W * 2, CAVERN_H * 2, UI_INK);
   gfx->setCursor(CX - 54, 56);
   gfx->print("TREASURE");
   gfx->setTextSize(1);
@@ -6178,6 +6181,7 @@ void renderAct() {
     drawChest(x, y, open, open && i == treasurePick, open ? treasureLoot[i] : 0);
     if (open) {
       snprintf(b, sizeof(b), "%u", treasureLoot[i]);
+      gfx->fillRoundRect(x + 25, y + 102, 50, 35, 9, glow);
       gfx->setTextSize(3);
       gfx->setTextColor(UI_INK);
       gfx->setCursor(x + 50 - (int)strlen(b) * 9, y + 108);
@@ -7311,6 +7315,21 @@ void drawPetPMD() {
   }
 
   drawPmdAct(act, (int)beh.x, PET_GROUND, elapsed, loop, false, 5);
+  if (mood == MOOD_EATING && act == PMD_IDLE) {
+    // Some forms never received an Eat clip. Show the berry being eaten
+    // alongside their own idle art, including when the pet is shiny.
+    const int x = (int)beh.x + 48;
+    const int y = PET_GROUND - 29;
+    const uint32_t bite = elapsed % 560;
+    if (bite < 300) {
+      gfx->fillCircle(x - bite / 24, y, 8 - bite / 65, C565(194, 56, 51));
+      gfx->drawLine(x - bite / 24, y - 5, x + 4 - bite / 24, y - 9, C565(74, 128, 48));
+    } else if (bite < 450) {
+      const int drift = (bite - 300) / 33;
+      gfx->fillCircle(x - 12 - drift, y - drift, 2, C565(249, 183, 122));
+      gfx->fillCircle(x - 8 + drift, y + drift, 2, C565(194, 56, 51));
+    }
+  }
 
   if (pet.showHeart()) drawMap(SPR_HEART, 32, (int)beh.x + 50, PET_GROUND - 190, 2, false);
 }

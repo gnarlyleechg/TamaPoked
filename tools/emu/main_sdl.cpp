@@ -203,12 +203,12 @@ static void writePPM(const char *path) {
 
 // Run the sketch's normal animation renderer on a fixed clock for repeatable
 // frame-by-frame inspection. Only the initial walk destination is scripted.
-static int starterActionShot(const char *screen, const char *out, int dex) {
+static int starterActionShot(const char *screen, const char *out, int dex, bool shiny) {
   if (dex < 1 || dex > DEX_COUNT) return 2;
   extern void emuSetCaptureTime(uint32_t);
   extern void emuWalkPilot(int, bool, uint32_t);
   extern void battleTap(int16_t, int16_t);
-  pet.dbgHatchAs(dex, false);
+  pet.dbgHatchAs(dex, shiny);
   pet.ageMinutes = 7UL * MINUTES_PER_LEVEL;
   pet.relearnFromLevel();
   while (pet.hasLearnOffer()) pet.declineLearn();
@@ -249,7 +249,7 @@ static int starterActionShot(const char *screen, const char *out, int dex) {
   return 0;
 }
 
-static int shotMode(const char *screen, const char *out, int lvl, int iv, int dex) {
+static int shotMode(const char *screen, const char *out, int lvl, int iv, int dex, bool shiny) {
   setup();
   for (int i = 0; i < 4; i++) loop();          // let the sketch settle
   bool firstBoot = !strcmp(screen, "starter") || !strcmp(screen, "starterj") ||
@@ -451,7 +451,7 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
   }
   if (!strcmp(screen, "starterwalk") || !strcmp(screen, "startereat") ||
       !strcmp(screen, "startersleep") || !strcmp(screen, "starterbattle"))
-    return starterActionShot(screen, out, dex);
+    return starterActionShot(screen, out, dex, shiny);
   if (!strcmp(screen, "homewalkpilot")) {
     extern void emuWalkPilot(int, bool, uint32_t);
     pet.dbgHatchAs(1, false);
@@ -478,6 +478,7 @@ int main(int argc, char **argv) {
   const char *shot = nullptr, *shotOut = "shot.ppm";
   const char *wav = nullptr, *demo = nullptr;
   int shotLvl = 0, shotIv = -1, shotDex = 6;
+  bool shotShiny = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--fast") && i + 1 < argc) emuSetTimeScale(atoi(argv[++i]));
@@ -489,12 +490,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--lvl") && i + 1 < argc) shotLvl = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--iv") && i + 1 < argc) shotIv = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--dex") && i + 1 < argc) shotDex = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--shiny")) shotShiny = true;
     else if (!strcmp(argv[i], "--sprites") && i + 1 < argc) emuSetSpriteDir(argv[++i]);
     else if (!strcmp(argv[i], "--wipe")) { remove(save); }
   }
   // Audio preview: no SDL, no board -- just a file you can listen to.
   if (wav) return wavMain(wav, demo);
-  if (shot) return shotMode(shot, shotOut, shotLvl, shotIv, shotDex);   // headless: no SDL at all
+  if (shot) return shotMode(shot, shotOut, shotLvl, shotIv, shotDex, shotShiny);   // headless: no SDL at all
   g_crashFile = std::string(save) + ".crash";
   crashRestore();     // a simulated panic left its breadcrumb here
   nvsLoad(save);
