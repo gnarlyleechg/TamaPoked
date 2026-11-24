@@ -35,3 +35,45 @@ def bake(dex,body,limbs,count=12):
         for j in range(1,len(layers),2):out.alpha_composite(layers[j])
         frames.append(out)
     return frames
+
+def pack_walk(frames):
+    """TPK2 pilot with idle and both walk directions. Shared 255-color palette."""
+    import struct
+    w,h=frames[0].size
+    if not 1<=w<=192 or not 1<=h<=192 or not 2<=len(frames)<=24:
+        raise ValueError("invalid dimensions")
+    atlas=Image.new("RGB",(w*len(frames),h))
+    for i,fr in enumerate(frames):
+        if fr.size!=(w,h):raise ValueError("frame size mismatch")
+        atlas.paste(fr.convert("RGB"),(i*w,0))
+    palette=atlas.quantize(colors=255)
+    colors=palette.getpalette()[:765]
+    colors += [0]*(765-len(colors))
+    out=bytearray(b"TPK2"+struct.pack("<BH",3,255))
+    for r,g,b in zip(colors[::3],colors[1::3],colors[2::3]):
+        out.extend(struct.pack("<H",((r>>3)<<11)|((g>>2)<<5)|(b>>3)))
+    for aid,seq in [(0,frames[:1]),(1,frames),(2,[fr.transpose(Image.Transpose.FLIP_LEFT_RIGHT) for fr in frames])]:
+        out.extend(struct.pack("<4B",aid,w,h,len(seq)))
+        out.extend(struct.pack("<"+"H"*len(seq),*([80]*len(seq))))
+        for fr in seq:
+            indices=fr.convert("RGB").quantize(palette=palette,dither=Image.Dither.NONE)
+            out.extend(255 if a<128 else p for p,a in zip(indices.getdata(),fr.getchannel("A").getdata()))
+    return bytes(out)
+
+if __name__=="__main__":
+    import argparse,json
+    from pathlib import Path
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("rig",type=Path)
+    p.add_argument("--out",type=Path,required=True)
+    a=p.parse_args()
+    spec=json.loads(a.rig.read_text())
+    def layer(name):
+        with Image.open(a.rig.parent/name) as im:return im.convert("RGBA")
+    frames=bake(spec["dex"],layer(spec["body"]),[
+        (l["root"],l["joint"],l["foot"],layer(l["upper"]),layer(l["lower"]))
+        for l in spec["limbs"]])
+    a.out.mkdir(parents=True,exist_ok=True)
+    # Pilot only: never overwrite the full original action pack.
+    (a.out/"walk-pilot.tpk2").write_bytes(pack_walk(frames))
+    frames[0].save(a.out/"walk-pilot.gif",save_all=True,append_images=frames[1:],duration=80,loop=0,disposal=2)
