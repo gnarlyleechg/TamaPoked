@@ -8,6 +8,7 @@
 #include "party.h"
 #include "battle.h"
 #include "moves.h"
+#include "sdmon.h"
 #include <chrono>
 #include <string>
 #include <deque>
@@ -141,6 +142,8 @@ void startBattle(int16_t dex, uint8_t lvl);
 extern Combatant btlYou, btlFoe;
 extern uint32_t btlLungeUntil[2], btlHitUntil[2];
 extern uint8_t btlMenu;
+extern bool battleOpen;
+extern PmdMon pmd, btlPmd[2];
 void startTrainerBattle(uint8_t idx, bool hard);
 void onTap(int16_t x, int16_t y);   // the first-boot shots tap their way in
 extern bool gymOpen, playerOpen;
@@ -205,6 +208,7 @@ static void writePPM(const char *path) {
 // frame-by-frame inspection. Only the initial walk destination is scripted.
 static int starterActionShot(const char *screen, const char *out, int dex, bool shiny) {
   if (dex < 1 || dex > DEX_COUNT) return 2;
+  const bool audit = !strcmp(out, "-");
   extern void emuSetCaptureTime(uint32_t);
   extern void emuWalkPilot(int, bool, uint32_t);
   extern void battleTap(int16_t, int16_t);
@@ -215,6 +219,7 @@ static int starterActionShot(const char *screen, const char *out, int dex, bool 
   pet.ceremony = 0;
   pet.sleeping = false;
   loop();  // sync the sprite for this species
+  if (audit && (!pmd.loaded || pmd.dex != dex)) return 4;
   pet.dbgSetSeen(13UL * 3600);  // midday is consistent across runs
   const uint32_t start = millis() + 5000;  // skip starter ceremony banners
   emuSetCaptureTime(start);
@@ -223,25 +228,43 @@ static int starterActionShot(const char *screen, const char *out, int dex, bool 
     emuWalkPilot(155, true, 0);
   } else if (!strcmp(screen, "startereat")) {
     pet.feed();
+    if (audit && pet.mood() != MOOD_EATING) return 5;
   } else if (!strcmp(screen, "startersleep")) {
     pet.toggleLight();
+    if (audit && pet.mood() != MOOD_SLEEPING) return 5;
   } else {
     startBattle(19, 8);
+    if (audit) {
+      if (!battleOpen || !btlPmd[0].loaded || btlPmd[0].dex != dex) return 5;
+      // Use the same known hit for every sprite, including species that
+      // have no unlocked damaging move at the fixture's level.
+      btlYou.moves[0] = MV_TACKLE;
+    }
   }
   for (int i = 0; i < 24; ++i) {
     emuSetCaptureTime(start + i * 100);
     if (i == 4 && !strcmp(screen, "starterbattle")) {
       battleTap(233, 296);
+      int selected = -1;
       for (int slot = 0; slot < MOVE_SLOTS; ++slot) {
         const uint8_t move = btlYou.moves[slot];
-        if (move && MOVE_TBL[move].power && MOVE_TBL[move].acc == 100) {
-          battleTap(149 + (slot % 2) * 168, 296 + (slot / 2) * 52);
+        if (!move) continue;
+        if (MOVE_TBL[move].power && MOVE_TBL[move].acc == 100) {
+          selected = slot;
           break;
         }
       }
+      if (selected >= 0)
+        battleTap(149 + (selected % 2) * 168, 296 + (selected / 2) * 52);
       if (!btlLungeUntil[0]) return 3;
+      if (audit && btlLungeUntil[0]) puts("Player lunge scheduled");
     }
+    gfx->frameReady = false;
     render();
+    if (audit) {
+      if (!gfx->frameReady) return 6;
+      continue;
+    }
     char name[512];
     snprintf(name, sizeof name, "%s-%02d.ppm", out, i);
     writePPM(name);
@@ -314,6 +337,14 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
   else if (!strcmp(screen, "train"))   trainOpen = true;
   else if (!strcmp(screen, "moves"))   { cardOpen = true; cardPage = 2; }
   else if (!strcmp(screen, "movepick")) { movePickOpen = true; }
+  else if (!strcmp(screen, "battleday") || !strcmp(screen, "battlenight")) {
+    if (dex < 1 || dex > DEX_COUNT) return 2;
+    pet.dbgHatchAs(25, false);
+    pet.ceremony = CER_NONE;
+    pet.dbgSetSeen((!strcmp(screen, "battlenight") ? 23UL : 13UL) * 3600);
+    startBattle(dex, 30);
+    if (!battleOpen || btlFoe.dex != dex) return 3;
+  }
   else if (!strcmp(screen, "battle2")) { startBattle(9, 50); }
   else if (!strcmp(screen, "btlmenu")) { startTrainerBattle(3, false); }
   else if (!strcmp(screen, "btlswitch")) { startTrainerBattle(3, false); btlMenu = 2; }

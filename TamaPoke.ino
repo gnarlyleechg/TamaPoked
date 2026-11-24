@@ -22,7 +22,6 @@
 #include "trainers.h"
 #include "link.h"
 #include "linknow.h"
-#include "backs.h"
 #include "home_backs.h"
 #include "fishing_back.h"
 #include "scene_backs.h"
@@ -45,7 +44,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.23"
+#define FW_VERSION "3.24"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -3526,41 +3525,16 @@ static void drawIndexedBackdrop(int left, int top, int w, int h,
   }
 }
 
-// Draws a battle backdrop scaled 2x. Emitted as runs of identical indices
-// rather than a write per pixel: this is flat pixel art with long horizontal
-// runs, and 240x112 at 2x would otherwise be 26,880 fillRect calls a frame.
-// The round bezel crops the overhang physically, so nothing is clipped here.
-static void drawBack(const BackScene &b, int y0) {
-  const int SC = 2;
-  int x0 = CX - (b.w * SC) / 2;
-  for (int r = 0; r < b.h; r++) {
-    const uint8_t *row = b.idx + (uint32_t)r * b.w;
-    int c = 0;
-    while (c < b.w) {
-      uint8_t v = row[c];
-      int run = 1;
-      while (c + run < b.w && row[c + run] == v) run++;
-      uint16_t col = b.pal[v];
-      gfx->fillRect(x0 + c * SC, y0 + r * SC, run * SC, SC, col);
-      c += run;
-    }
-  }
-}
-
-// Which scene: the FOE's biome, since a battle happens where it lives, and the
-// same day/night split the main screen already uses.
+// A battle uses the opponent's native biome and the current in-game time.
 static void drawBattleBack() {
-  int16_t dex = btlFoe.dex;
+  const int16_t dex = btlFoe.dex;
   if (dex < 1 || dex > DEX_COUNT) { gfx->fillCircle(CX, CY, 231, UI_BG_DAY); return; }
-  uint8_t bi = DEX_TBL[dex].biome;
-  if (bi >= BACK_BIOMES) bi = 0;
+  uint8_t biome = DEX_TBL[dex].biome;
+  if (biome >= sizeof(BATTLE_BACKDROPS) / sizeof(BATTLE_BACKDROPS[0])) biome = 0;
   const int hour = sceneHour();
   const bool night = hour < 6 || hour >= 20;
-  if (!night && (bi == 0 || bi == 2)) {
-    drawIndexedBackdrop(0, 0, WOODLAND_W, WOODLAND_H, WOODLAND_PIXELS, WOODLAND_PALETTE);
-    return;
-  }
-  drawBack(BACKS[bi][night ? 1 : 0], 30);
+  const BattleBackdrop &back = BATTLE_BACKDROPS[biome];
+  drawIndexedBackdrop(0, 0, ARENA_W, ARENA_H, back.pixels, back.palettes[night]);
 }
 
 // Streams a side's sprite if it is not already the one loaded. Called whenever

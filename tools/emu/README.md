@@ -67,6 +67,9 @@ For repeatable animation sequences, use `--shot starterwalk`, `startereat`,
 Use `--out pikachu` to write 24 numbered frames at 100 ms intervals.
 Add `--shiny` to capture the species' shiny variant in these sequences.
 Restore the bundled sprites with `tools/unpack_emulator_assets.py` first.
+Use `--out -` to audit sprite loading, action state and framebuffer flushes for
+these sequences without writing PPM files. For a battle background, use
+`--shot battleday` or `--shot battlenight` with the opponent's `--dex`.
 
 ## How it works
 
