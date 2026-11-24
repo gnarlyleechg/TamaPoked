@@ -5884,19 +5884,69 @@ static void drawFishScene() {
   const int L = 40, T = 108, W = 386, H = 250;     // the window
   const int WATER_Y = 262;
   uint32_t now = millis();
-  gfx->fillRoundRect(L, T, W, H, 14, C565(150, 205, 240));                   // sky
-  gfx->fillCircle(L + W - 52, T + 40, 18, 0xFEA0);                            // sun
-  gfx->fillCircle(L + 230, T + 34, 11, 0xFFFF); gfx->fillCircle(L + 248, T + 30, 14, 0xFFFF); gfx->fillCircle(L + 268, T + 36, 10, 0xFFFF);
-  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, C565(50, 120, 190)); // water
-  gfx->fillRect(L, WATER_Y, W, 16, C565(50, 120, 190));
-  for (int i = 0; i < 6; i++) {                                               // little waves
-    int wx = L + 150 + i * 42 + (int)((now / 120) % 20) - 10, wy = WATER_Y + 20 + (i % 3) * 22;
-    gfx->drawFastHLine(wx, wy, 14, C565(120, 180, 230));
+  // Original, lightweight park-inspired scenery: distant I-210 bridge,
+  // wooded shoreline and sunset reflected on Prien Lake. This is an artistic
+  // interpretation, not a survey or photo of a specific fishing platform.
+  const uint16_t skyTop = C565(102, 157, 189), skyLow = C565(253, 207, 152);
+  const uint16_t waterFar = C565(108, 153, 160), waterNear = C565(37, 89, 112);
+  gfx->fillRoundRect(L, T, W, H, 14, skyTop);
+  for (int y = T + 14; y < WATER_Y; y += 7) {
+    const int h = WATER_Y - y < 7 ? WATER_Y - y : 7;
+    gfx->fillRect(L + 1, y, W - 2, h, lerp565(skyTop, skyLow, y - T, WATER_Y - T));
   }
-  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(160, 110, 60));                 // the dock
-  for (int i = 0; i < 5; i++) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y - 2, 12, C565(110, 70, 35));
-  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(110, 70, 35));
-  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(110, 70, 35));
+  gfx->fillCircle(331, 167, 25, C565(250, 224, 169));
+  gfx->fillCircle(331, 167, 18, C565(255, 241, 186));
+  for (int i = 0; i < 6; ++i) {
+    const int x = L + 32 + i * 58;
+    gfx->fillRoundRect(x, T + 36 + (i % 3) * 14, 42 + (i % 2) * 21, 4, 2, C565(220, 221, 211));
+  }
+  const uint16_t distant = C565(84, 114, 115);
+  gfx->fillRect(L + 1, WATER_Y - 12, W - 2, 12, distant);
+  for (int i = 0; i < 22; ++i) {
+    const int x = L + 8 + i * 17;
+    const int r = 8 + (i * 7) % 10;
+    gfx->fillCircle(x, WATER_Y - 13 - (i % 3) * 3, r, distant);
+  }
+  // Stylized high bridge silhouette on the far side of the lake.
+  const uint16_t bridge = C565(70, 88, 91);
+  gfx->drawLine(174, 243, 240, 220, bridge);
+  gfx->fillRect(240, 219, 78, 4, bridge);
+  gfx->drawLine(317, 220, 412, 243, bridge);
+  gfx->drawLine(174, 246, 240, 223, bridge);
+  gfx->drawLine(317, 223, 412, 246, bridge);
+  for (int i = 0; i < 5; ++i) {
+    int x = 192 + 49 * i;
+    int y = x < 240 ? 244 - (x - 174) * 23 / 66 :
+            x < 318 ? 221 : 221 + (x - 318) * 23 / 94;
+    gfx->fillRect(x, y, 3, WATER_Y - y, bridge);
+  }
+  // Foreground shade trees frame the shoreline, away from the hook target.
+  gfx->fillRect(L + 17, T + 46, 7, WATER_Y - T - 46, C565(85, 80, 57));
+  for (int i = 0; i < 7; ++i)
+    gfx->fillCircle(L + 17 + i * 12, T + 45 + (i % 3) * 9, 15, C565(62, 100 + (i % 3) * 10, 73));
+  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, waterNear);
+  for (int y = WATER_Y; y < T + H - 14; y += 6) {
+    const int h = T + H - 14 - y < 6 ? T + H - 14 - y : 6;
+    gfx->fillRect(L + 1, y, W - 2, h, lerp565(waterFar, waterNear, y - WATER_Y, H - (WATER_Y - T)));
+  }
+  // Deterministic moving reflections, no game RNG consumed by rendering.
+  for (int i = 0; i < 23; ++i) {
+    const int wy = WATER_Y + 5 + (i * 13) % 75;
+    const int wx = L + 155 + (i * 41 + (int)(now / 150 % 15)) % 190;
+    const int len = 6 + (i * 9) % 22;
+    gfx->drawFastHLine(wx, wy, len, lerp565(waterFar, skyLow, i % 4, 5));
+  }
+  for (int i = 0; i < 9; ++i) {
+    int len = 10 + (i * 13) % 40;
+    gfx->drawFastHLine(331 - len / 2, WATER_Y + 4 + i * 6, len, C565(205, 184, 141));
+  }
+  // Keep the original dock/platform footprint and creature/rod coordinates.
+  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(153, 122, 87));
+  gfx->fillRect(L, WATER_Y - 2, 150, 2, C565(212, 178, 131));
+  gfx->fillRect(L, WATER_Y + 7, 150, 3, C565(86, 70, 53));
+  for (int i = 0; i < 5; ++i) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y, 7, C565(105, 82, 58));
+  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(86, 70, 53));
+  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(86, 70, 53));
   gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
 
   int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
@@ -6035,6 +6085,10 @@ void renderAct() {
   }
   if (actState == 1) {                         // fishing
     drawFishScene();
+    gfx->setTextSize(2);
+    gfx->setTextColor(UI_INK);
+    gfx->setCursor(CX - 90, 56);
+    gfx->print("PRIEN LAKE PARK");
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     const char *head = fishPhase == 0 ? "tap to cast" : fishPhase == 1 ? "wait for a bite..." : fishPhase == 2 ? "TAP NOW!" : actMsg;
