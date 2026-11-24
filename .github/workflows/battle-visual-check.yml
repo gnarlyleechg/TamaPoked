@@ -15,6 +15,7 @@ on:
       - 'tools/pokemon_motion.py'
       - 'tools/bake_pokemon_walk.py'
       - 'tools/bulbasaur_walk_pilot.py'
+      - 'tools/merge_walk_pilot.py'
       - 'tools/test_pokemon_motion.py'
       - 'tools/unpack_emulator_assets.py'
       - '.github/workflows/battle-visual-check.yml'
@@ -91,6 +92,19 @@ jobs:
           "$RUNNER_TEMP/portrait-venv/bin/python" tools/bulbasaur_walk_pilot.py "$RUNNER_TEMP/battle-shots/bulbasaur"
           test -s "$RUNNER_TEMP/battle-shots/bulbasaur/bulbasaur-pilot.tpk2"
           test -s "$RUNNER_TEMP/battle-shots/bulbasaur/bulbasaur-walk.gif"
+          ROOT="$PWD"
+          OUT="$RUNNER_TEMP/battle-shots/bulbasaur"
+          PY="$RUNNER_TEMP/portrait-venv/bin/python"
+          cp tools/sdcard/mons/p001.bin "$RUNNER_TEMP/original-p001.bin"
+          cd "$OUT"
+          rm -f tamapoke.nvs
+          "$ROOT/tools/emu/tamapoke-emu" --shot homewalkpilot --dex 1 --out baseline
+          "$PY" "$ROOT/tools/merge_walk_pilot.py" "$RUNNER_TEMP/original-p001.bin" "$OUT/bulbasaur-pilot.tpk2" "$ROOT/tools/sdcard/mons/p001.bin"
+          rm -f tamapoke.nvs
+          "$ROOT/tools/emu/tamapoke-emu" --shot homewalkpilot --dex 1 --out articulated
+          "$PY" -c 'from PIL import Image; from pathlib import Path; a=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("articulated-*.ppm"))]; b=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("baseline-*.ppm"))]; assert len(a)==len(b)==12; assert any(x.tobytes()!=y.tobytes() for x,y in zip(a,b)); a[0].save("living-room-walk.gif",save_all=True,append_images=a[1:],duration=80,loop=0); print("PASS: 12 real emulator comparison frames")'
+          cp "$RUNNER_TEMP/original-p001.bin" "$ROOT/tools/sdcard/mons/p001.bin"
+          rm -f tamapoke.nvs
       - uses: actions/upload-artifact@v4
         with:
           name: battle-visual-emulator-screens
