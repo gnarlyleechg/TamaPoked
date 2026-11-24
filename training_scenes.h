@@ -60,7 +60,7 @@ template<class G> void training(G*g,Training mode){
    floor(g,260,466,rgb(222,231,232),92);
    g->fillRoundRect(109,105,248,236,32,rgb(223,237,237));g->drawRoundRect(109,105,248,236,32,rgb(185,209,213));
  }else{
-   gradient(g,0,280,rgb(128,190,223),rgb(240,245,221));
+   gradient(g,0,302,rgb(128,190,223),rgb(240,245,221));
    for(int x: {54,355}){g->fillCircle(x,95,27,rgb(229,242,236));g->fillCircle(x+25,105,22,rgb(229,242,236));}
    for(int x=0;x<490;x+=37)tree(g,x,302,48+(x*7)%42,rgb(84,147,102));
    g->fillRect(0,302,466,8,rgb(143,167,129));
