@@ -12,6 +12,8 @@ on:
       - 'sdmon.cpp'
       - 'tools/emu/**'
       - 'tools/pack_portrait.py'
+      - 'tools/pokemon_motion.py'
+      - 'tools/test_pokemon_motion.py'
       - 'tools/unpack_emulator_assets.py'
       - '.github/workflows/battle-visual-check.yml'
   workflow_dispatch:
@@ -34,6 +36,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - name: Restore existing sprite test fixtures
         run: python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
+      - name: Check articulated gait mathematics
+        run: python3 tools/test_pokemon_motion.py
       - name: Run real-source host tests
         run: |
           mkdir -p "$RUNNER_TEMP/battle-shots"
