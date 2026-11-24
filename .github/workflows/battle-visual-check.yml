@@ -4,7 +4,7 @@ name: TamaPoke visual pilot verification
 # installer files, pushes to the repository, or flashes any device.
 on:
   pull_request:
-    branches: [codex/pokemon-visual-pilot]
+    branches: [codex/pokemon-visual-pilot, codex/tamapoke-battle-scene-polish]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'TamaPoke.ino'
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   host:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish' || github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -59,7 +59,7 @@ jobs:
           retention-days: 7
 
   firmware:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish')
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.head.ref == 'codex/tamapoke-battle-scene-polish' || github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
