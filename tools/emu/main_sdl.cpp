@@ -144,6 +144,9 @@ void startTrainerBattle(uint8_t idx, bool hard);
 void onTap(int16_t x, int16_t y);   // the first-boot shots tap their way in
 extern bool gymOpen, playerOpen;
 extern bool galleryDirty;
+extern int16_t galleryDetail;
+extern int galleryPage;
+void galleryTap(int16_t, int16_t);
 extern uint8_t galleryRegion;
 extern uint8_t gymRegion;
 extern bool gymPick, galleryPick;
@@ -238,6 +241,14 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     galleryOpen = true;
     galleryDirty = true;
     for (int d = 1; d <= 200; d++) pet.dbgHatchAs(d, false);
+  }
+  else if (!strcmp(screen, "gallerydetail")) {
+    // The same canonical Bulbasaur used in the visual pilot, selected through
+    // the real gallery handler. This only changes the emulator fixture.
+    pet.dbgHatchAs(1, false);
+    galleryOpen = true; galleryPick = false; galleryDirty = true;
+    galleryRegion = 0; galleryPage = 0; galleryDetail = 0;
+    galleryTap(113, 124);
   }
   else if (!strcmp(screen, "gallery2")) {   // the second region
     galleryOpen = true;
