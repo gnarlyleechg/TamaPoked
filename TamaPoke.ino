@@ -5573,9 +5573,12 @@ void renderTrain() {
   for (int i = 0; i < 3; i++) {
     int y = TRAIN_ROW_Y(i);
     bool passive = false;      // every row opens a game now, DEF included
+    const uint16_t skillColor[3] = { C565(188, 83, 65), C565(74, 140, 167), C565(91, 142, 106) };
+    gfx->fillRoundRect(TRAIN_X + 18, y + 2, TRAIN_W - 36, TRAIN_ROW_H, 12, UI_TRACK);
     gfx->fillRoundRect(TRAIN_X + 18, y, TRAIN_W - 36, TRAIN_ROW_H, 12,
-                       passive ? UI_TRACK : UI_BG_DAY);
+                       passive ? UI_TRACK : lerp565(skillColor[i], UI_WHITE, 7, 8));
     gfx->drawRoundRect(TRAIN_X + 18, y, TRAIN_W - 36, TRAIN_ROW_H, 12, UI_INK);
+    gfx->fillRoundRect(TRAIN_X + 23, y + 9, 4, TRAIN_ROW_H - 18, 2, skillColor[i]);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(TRAIN_X + 32, y + 10);
@@ -6005,13 +6008,23 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
   gfx->fillRoundRect(x + 4, y + 36, 92, 48, 6, wood);                            // body
   gfx->fillRect(x + 4, y + 52, 92, 5, dark);
   gfx->drawRoundRect(x + 4, y + 36, 92, 48, 6, UI_INK);
+  // Decorative grain and highlights, within the existing chest footprint.
+  for (int k = 0; k < 3; ++k) gfx->drawFastHLine(x + 31, y + 57 + 8*k, 38, dark);
   gfx->fillRect(x + 20, y + 36, 8, 48, gold); gfx->fillRect(x + 72, y + 36, 8, 48, gold);   // straps
+  gfx->fillRect(x + 21, y + 40, 2, 40, C565(255, 239, 178));
+  gfx->fillRect(x + 73, y + 40, 2, 40, C565(255, 239, 178));
   if (!open) {
     gfx->fillRoundRect(x + 4, y + 16, 92, 26, 12, wood);                           // lid, shut
     gfx->drawRoundRect(x + 4, y + 16, 92, 26, 12, UI_INK);
     gfx->fillRect(x + 20, y + 18, 8, 22, gold); gfx->fillRect(x + 72, y + 18, 8, 22, gold);
     gfx->fillRoundRect(x + 42, y + 34, 16, 16, 3, gold);                           // lock
-    gfx->fillCircle(x + 50, y + 41, 3, UI_INK);
+    // Pokeball-inspired clasp: original geometric emblem, not a new creature.
+    gfx->fillCircle(x + 50, y + 40, 8, UI_WHITE);
+    gfx->fillRoundRect(x + 43, y + 33, 14, 7, 3, C565(188, 54, 48));
+    gfx->drawCircle(x + 50, y + 40, 8, UI_INK);
+    gfx->drawFastHLine(x + 43, y + 40, 15, UI_INK);
+    gfx->fillCircle(x + 50, y + 40, 3, UI_WHITE);
+    gfx->drawCircle(x + 50, y + 40, 3, UI_INK);
   } else {
     gfx->fillRoundRect(x + 8, y + 30, 84, 12, 4, 0x2104);                          // the dark inside
     gfx->fillRoundRect(x + 4, y - 4, 92, 22, 10, wood);                            // lid, tipped back
@@ -6121,7 +6134,19 @@ void renderAct() {
     gfx->flush();
     return;
   }
-  // treasure
+  // Treasure cavern: original decorative scenery behind the same three
+  // selectable chests. Keep the header, coin labels and back target clear.
+  const uint16_t stone = C565(98, 91, 119);
+  const uint16_t glow = C565(231, 222, 191);
+  gfx->fillRoundRect(48, 116, 370, 243, 24, C565(180, 173, 187));
+  for (int y = 138; y < 335; y += 12)
+    gfx->fillRect(60, y, 346, 12, lerp565(stone, glow, y - 138, 197));
+  for (int i = 0; i < 7; ++i) {
+    const int x = 69 + i * 51;
+    gfx->fillTriangle(x, 120, x + 24, 120, x + 13, 143 + (i * 17) % 21, stone);
+    gfx->fillTriangle(x, 343, x + 20, 343, x + 9, 312 + (i * 7) % 16, C565(147, 140, 162));
+  }
+  gfx->fillRoundRect(62, 225, 342, 88, 16, glow);
   gfx->setCursor(CX - 54, 56);
   gfx->print("TREASURE");
   gfx->setTextSize(1);
