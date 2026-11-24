@@ -1,4 +1,4 @@
-name: Battle visual pilot verification
+name: TamaPoke visual pilot verification
 
 # This isolated workflow checks the draft battle branch only. It never publishes
 # installer files, pushes to the repository, or flashes any device.
@@ -7,6 +7,7 @@ on:
     branches: [codex/tamapoke-battle-scene-polish]
     paths:
       - 'TamaPoke.ino'
+      - 'sprite_runs.h'
       - 'tools/emu/**'
       - '.github/workflows/battle-visual-check.yml'
   workflow_dispatch:
@@ -27,17 +28,21 @@ jobs:
       - name: Install emulator dependency
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - name: Run real-source host tests
-        run: bash tools/emu/tests/run.sh
-      - name: Render battle screenshots
+        run: |
+          mkdir -p "$RUNNER_TEMP/battle-shots"
+          WALK_SHOTS="$RUNNER_TEMP/battle-shots" bash tools/emu/tests/run.sh
+      - name: Render battle and Pokedex screenshots
         run: |
           mkdir -p "$RUNNER_TEMP/battle-shots"
           EMU="$PWD/tools/emu/tamapoke-emu"
           cd "$RUNNER_TEMP/battle-shots"
-          for screen in btlmenu btlmoves btlswitch battleanim; do
+          for screen in btlmenu btlmoves btlswitch battleanim gallery gallerydetail; do
             rm -f tamapoke.nvs
             "$EMU" --shot "$screen" --lvl 30 --out "$screen.ppm"
             test -s "$screen.ppm"
           done
+          test -s fishing.ppm
+          test -s gallerydetail.ppm
       - uses: actions/upload-artifact@v4
         with:
           name: battle-visual-emulator-screens
