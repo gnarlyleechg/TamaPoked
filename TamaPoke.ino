@@ -26,6 +26,7 @@
 #include "fishing_back.h"
 #include "scene_backs.h"
 #include "training_scenes.h"
+#include "textured_scenes.h"
 #include "sprite_runs.h"
 #include "sprite_fit.h"
 #include "badges.h"
@@ -2771,11 +2772,26 @@ void sackTap() {
   sackShake = 16;  // sacude el saco
 }
 
+// One optional PSRAM cache for every training and gym scene. Allocate once;
+// on allocation failure retain the existing low-memory drawing path.
+static scene_texture::Cache scenicCache;
+static bool scenicCacheAttempted = false;
+static void prepareScenicCache() {
+  if (!scenicCacheAttempted) {
+    scenicCacheAttempted = true;
+    scenicCache.pixels = (uint16_t *)ps_malloc(scene_texture::CacheBytes);
+  }
+}
+static void drawTrainingBackdrop(int mode) {
+  prepareScenicCache();
+  if (scenicCache.training(mode)) scenicCache.blit(gfx, scene_texture::H);
+  else scene_art::training(gfx, scene_art::Training(mode));
+}
 void drawGameScene();  // prototipo (definida mas abajo)
 
 void renderSack() {
   uint32_t now = millis();
-  scene_art::training(gfx, scene_art::Strength);
+  drawTrainingBackdrop(scene_art::Strength);
   const uint16_t ink = UI_INK;
 
   // pantalla de resultado
@@ -2864,7 +2880,7 @@ void renderSack() {
 
 // fondo del minijuego: hatibat del bicho (cielo por hora + suelo del bioma)
 void drawGameScene() {
-  scene_art::training(gfx, scene_art::Ball);
+  drawTrainingBackdrop(scene_art::Ball);
 }
 
 void renderGame() {
@@ -3516,7 +3532,11 @@ static void drawBattleBack() {
   if (key >= 0) {
     const Trainer &tr = BTL_TRAINERS[btlTrainer];
     const int hour = sceneHour();
-    scene_art::gym(gfx, btlRegion, btlTrainer, tr.type, typeColor(tr.type), hour < 6 || hour >= 20);
+    const bool night = hour < 6 || hour >= 20;
+    const uint16_t accent = typeColor(tr.type);
+    prepareScenicCache();
+    if (scenicCache.gym(btlRegion, btlTrainer, tr.type, accent, night)) scenicCache.blit(gfx, 127);
+    else scene_art::gym(gfx, btlRegion, btlTrainer, tr.type, accent, night);
     return;
   }
   const int16_t dex = btlFoe.dex;
@@ -4678,7 +4698,7 @@ void spdTap(int16_t x, int16_t y) {
 
 void renderSpeed() {
   uint32_t now = millis();
-  scene_art::training(gfx, scene_art::Reaction);
+  drawTrainingBackdrop(scene_art::Reaction);
   const uint16_t ink = UI_INK;
 
   if (spdOverUntil) {
