@@ -36,14 +36,17 @@ def bake(dex,body,limbs,count=12):
         frames.append(out)
     return frames
 
-def pack_walk(frames):
+def pack_walk(frames, idle=None):
     """TPK2 pilot with idle and both walk directions. Shared 255-color palette."""
     import struct
     w,h=frames[0].size
     if not 1<=w<=192 or not 1<=h<=192 or not 2<=len(frames)<=24:
         raise ValueError("invalid dimensions")
-    atlas=Image.new("RGB",(w*len(frames),h))
-    for i,fr in enumerate(frames):
+    idle=frames[:1] if idle is None else idle
+    if not 1<=len(idle)<=24: raise ValueError("invalid idle count")
+    allframes=frames+idle
+    atlas=Image.new("RGB",(w*len(allframes),h))
+    for i,fr in enumerate(allframes):
         if fr.size!=(w,h):raise ValueError("frame size mismatch")
         atlas.paste(fr.convert("RGB"),(i*w,0))
     palette=atlas.quantize(colors=255)
@@ -52,7 +55,7 @@ def pack_walk(frames):
     out=bytearray(b"TPK2"+struct.pack("<BH",3,255))
     for r,g,b in zip(colors[::3],colors[1::3],colors[2::3]):
         out.extend(struct.pack("<H",((r>>3)<<11)|((g>>2)<<5)|(b>>3)))
-    for aid,seq in [(0,frames[:1]),(1,frames),(2,[fr.transpose(Image.Transpose.FLIP_LEFT_RIGHT) for fr in frames])]:
+    for aid,seq in [(0,idle),(1,frames),(2,[fr.transpose(Image.Transpose.FLIP_LEFT_RIGHT) for fr in frames])]:
         out.extend(struct.pack("<4B",aid,w,h,len(seq)))
         out.extend(struct.pack("<"+"H"*len(seq),*([80]*len(seq))))
         for fr in seq:
