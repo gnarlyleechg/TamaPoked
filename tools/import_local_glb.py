@@ -3,7 +3,8 @@ import argparse, hashlib, json, subprocess, tempfile, shutil
 from pathlib import Path
 from PIL import Image
 from bake_pokemon_walk import pack_walk
-from merge_walk_pilot import merge, read
+from merge_walk_pilot import read
+from local_palette import merge_local, equivalent
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -42,9 +43,9 @@ def main():
         pilot=root/"pilot.tpk2"
         pilot.write_bytes(pack_walk(frames))
         staged=root/name
-        staged.write_bytes(merge(original,pilot))
+        staged.write_bytes(merge_local(original,pilot))
         pal,acts=read(staged)
-        if pal[:len(oldpal)]!=oldpal or any(acts[k]!=v for k,v in oldacts.items() if k not in (1,2)):
+        if any(not equivalent(oldpal,v,pal,acts[k]) for k,v in oldacts.items() if k not in (1,2)):
             raise ValueError("Original actions changed")
         out.mkdir(parents=True)
         shutil.copyfile(staged,out/name)
