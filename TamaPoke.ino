@@ -5583,6 +5583,7 @@ void renderTrain() {
 
   gfx->fillRoundRect(TRAIN_X, TRAIN_Y, TRAIN_W, TRAIN_H, 18, UI_WHITE);
   gfx->drawRoundRect(TRAIN_X, TRAIN_Y, TRAIN_W, TRAIN_H, 18, UI_INK);
+  gfx->drawFastHLine(TRAIN_X + 30, TRAIN_Y + 45, TRAIN_W - 60, UI_TRACK);
 
   gfx->setTextColor(UI_INK);
   gfx->setTextSize(2);
@@ -5935,6 +5936,14 @@ static void drawFishScene() {
     const int r = 8 + (i * 7) % 10;
     gfx->fillCircle(x, WATER_Y - 13 - (i % 3) * 3, r, distant);
   }
+  // Layered foliage and atmospheric depth; deterministic, no gameplay RNG.
+  for (int i = 0; i < 38; ++i) {
+    int x = L + 12 + (i * 47) % (W - 24);
+    int y = WATER_Y - 18 - (i * 11) % 17;
+    int r = 4 + (i * 3) % 7;
+    gfx->fillCircle(x, y, r, C565(69 + i % 19, 103 + i % 23, 91 + i % 13));
+    gfx->fillCircle(x - 2, y - 2, r / 2, C565(106, 137, 112));
+  }
   // Stylized high bridge silhouette on the far side of the lake.
   const uint16_t bridge = C565(70, 88, 91);
   gfx->drawLine(174, 243, 240, 220, bridge);
@@ -5968,11 +5977,22 @@ static void drawFishScene() {
     int len = 10 + (i * 13) % 40;
     gfx->drawFastHLine(331 - len / 2, WATER_Y + 4 + i * 6, len, C565(205, 184, 141));
   }
+  // Fine water ripples and broken reflected shoreline.
+  for (int i = 0; i < 52; ++i) {
+    int y = WATER_Y + 3 + (i * 19) % 77;
+    int x = L + 12 + (i * 53 + now / 240 % 7) % (W - 44);
+    int len = 3 + (i * 7) % 23;
+    gfx->drawFastHLine(x, y, len, lerp565(waterNear, waterFar, 2 + i % 5, 8));
+  }
   // Keep the original dock/platform footprint and creature/rod coordinates.
   gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(153, 122, 87));
   gfx->fillRect(L, WATER_Y - 2, 150, 2, C565(212, 178, 131));
   gfx->fillRect(L, WATER_Y + 7, 150, 3, C565(86, 70, 53));
   for (int i = 0; i < 5; ++i) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y, 7, C565(105, 82, 58));
+  for (int i = 0; i < 12; ++i) {
+    int x = L + 5 + i * 12;
+    gfx->drawFastHLine(x, WATER_Y + 3 + i % 3, 8, C565(124, 95, 65));
+  }
   gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(86, 70, 53));
   gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(86, 70, 53));
   gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
@@ -6671,7 +6691,8 @@ void renderGallery() {
     const uint16_t accent = reg ? d.accent : UI_TRACK;
     gfx->fillRoundRect(62, 104, 342, 278, 24, UI_WHITE);
     gfx->drawRoundRect(62, 104, 342, 278, 24, lerp565(UI_INK, accent, 3, 4));
-    gfx->fillCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 7, 8));
+    for (int r = 109; r > 0; r -= 4)
+      gfx->fillCircle(CX, 223, r, lerp565(accent, UI_WHITE, 7 + (109-r)*8/109, 16));
     gfx->drawCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 3, 4));
     gfx->fillRoundRect(CX - 72, 301, 144, 15, 7, lerp565(accent, UI_WHITE, 4, 5));
     gfx->fillRoundRect(CX - 52, 303, 104, 7, 3, lerp565(accent, UI_WHITE, 2, 3));
