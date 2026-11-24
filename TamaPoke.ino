@@ -3973,6 +3973,12 @@ static void btlDrawButton(int x, int y, int w, int h, uint16_t color) {
   gfx->fillRect(x + 14, y + 4, w - 28, 2, UI_WHITE);
 }
 
+// Keep the arena shadow tied to the base of the actual sprite frame.
+static void btlDrawGroundShadow(int footX, int footY) {
+  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
+  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
+}
+
 static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t who) {
   // Raised, species-accented name plates keep small text readable over scenery.
   int ph = (who == 0) ? 54 : 40;
@@ -4032,19 +4038,13 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     ox += ((left / 50) % 2) ? 5 : -5;      // jitter
   }
 
-  // The shadow is anchored at the creature's real baseline. PMD sprites use
-  // a feet anchor at sy+78; the 16px thumbnail fallback is 48px tall at 3x.
-  // Drawing it before either sprite adds depth without changing animations.
-  const int footX = sx + 24;
-  const int footY = sy + (btlPmd[who].loaded ? 78 : 48);
-  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
-  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
-
   // Real PMD playback when the sprite streamed: attack while lunging, hurt
   // while flinching, idle otherwise. `has()` guards every one, because not
   // every species ships every action -- falling through to idle, and to the
   // flat thumbnail if the sprite is missing entirely (no SD).
   if (btlPmd[who].loaded) {
+    // PMD actions use an explicit fixed feet anchor.
+    btlDrawGroundShadow(sx + 24, sy + 78);
     uint8_t act = PMD_IDLE;
     bool loop = true;
     uint32_t t = now;
@@ -4058,6 +4058,10 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   }
   const uint8_t *th = thumbs.get(c.dex);
   if (!th) return;
+  // drawThumb centers the bitmap in GAL_CELL; its height is stored in th[1].
+  // Keep this grounded on the actual frame, rather than assume a 16px sprite.
+  const int thumbH = th[1] * 3;
+  btlDrawGroundShadow(sx + GAL_CELL / 2, sy + (GAL_CELL - thumbH) / 2 + thumbH);
   if (now < btlHitUntil[who]) flash = ((btlHitUntil[who] - now) / 60) % 2 == 0;
   drawThumb(th, sx + ox, sy + oy, 3, flash);
 }
