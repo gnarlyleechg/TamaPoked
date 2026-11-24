@@ -27,6 +27,7 @@
 #include "scene_backs.h"
 #include "training_scenes.h"
 #include "textured_scenes.h"
+#include "painted_scenes.h"
 #include "sprite_runs.h"
 #include "sprite_fit.h"
 #include "badges.h"
@@ -2775,6 +2776,12 @@ void sackTap() {
 // One optional PSRAM cache for every training and gym scene. Allocate once;
 // on allocation failure retain the existing low-memory drawing path.
 static scene_texture::Cache scenicCache;
+static painted_scene::Selection paintedSelection;
+#ifdef SPRITE_DIR
+static const char *scenicDirectory = SPRITE_DIR "/../scenes";
+#else
+static const char *scenicDirectory = "/sdcard/scenes";
+#endif
 static bool scenicCacheAttempted = false;
 static void prepareScenicCache() {
   if (!scenicCacheAttempted) {
@@ -2782,9 +2789,21 @@ static void prepareScenicCache() {
     scenicCache.pixels = (uint16_t *)ps_malloc(scene_texture::CacheBytes);
   }
 }
+static bool selectPaintedScene(int id, bool night) {
+  if (!sdReady) { paintedSelection.invalidate(); return false; }
+  return paintedSelection.select(scenicCache, scenicDirectory, id, night);
+}
 static void drawTrainingBackdrop(int mode) {
   prepareScenicCache();
-  if (scenicCache.training(mode)) scenicCache.blit(gfx, scene_texture::H);
+  if (selectPaintedScene(mode, false)) {
+    scenicCache.blit(gfx, scene_texture::H);
+    // Quiet backing for HUD and results. Keep the moving game area unobstructed.
+    const bool result = mode == scene_art::Strength ? sackOverUntil != 0 :
+                        mode == scene_art::Reaction ? spdOverUntil != 0 : gameOverUntil != 0;
+    if (result) gfx->fillRoundRect(66, 132, 334, 166, 18, UI_BG_DAY);
+    else if (mode == scene_art::Strength) gfx->fillRoundRect(108, 252, 250, 121, 18, UI_BG_DAY);
+    else gfx->fillRoundRect(126, 18, 214, 118, 18, UI_BG_DAY);
+  } else if (scenicCache.training(mode)) scenicCache.blit(gfx, scene_texture::H);
   else scene_art::training(gfx, scene_art::Training(mode));
 }
 void drawGameScene();  // prototipo (definida mas abajo)
@@ -3535,7 +3554,8 @@ static void drawBattleBack() {
     const bool night = hour < 6 || hour >= 20;
     const uint16_t accent = typeColor(tr.type);
     prepareScenicCache();
-    if (scenicCache.gym(btlRegion, btlTrainer, tr.type, accent, night)) scenicCache.blit(gfx, 127);
+    if (selectPaintedScene(3 + key, night)) scenicCache.blit(gfx, 127);
+    else if (scenicCache.gym(btlRegion, btlTrainer, tr.type, accent, night)) scenicCache.blit(gfx, 127);
     else scene_art::gym(gfx, btlRegion, btlTrainer, tr.type, accent, night);
     return;
   }
