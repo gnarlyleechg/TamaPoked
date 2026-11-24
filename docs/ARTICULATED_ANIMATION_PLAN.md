@@ -1,0 +1,7 @@
+# Natural Pokémon animation milestone
+
+Reference: TamaPup branch feature/tamapup-battle-locations, projects/tamapup/firmware/cats/tools/walk_rig.py (reviewed directly). Its offline two-bone IK, independent limb phases, rigid textured segments, overlap at joints and baked TPK2 frames are the starting technique, not a universal cat skeleton.
+
+Pilot: Bulbasaur (#1) four-legged gait with stable bulb; Charmander (#4) alternating two-legged steps, independent arms and tail with intact flame; Squirtle (#7) two-legged gait with rigid shell and independent arms; Pikachu (#25) species-appropriate short steps or bounds with ears and tail follow-through. Preserve canonical anatomy, colors, shiny identity and existing action semantics. Author per-view landmarks and layer masks from actual detailed art; do not invent hidden limbs by blindly stretching a portrait. Keep original PMD assets as fallback.
+
+Bake offline to existing TPK2 action frames, native scale, fixed ground anchor. Match stance displacement to firmware travel speed; no whole-body sliding, floating feet, detached joints or rubber stretching. Include idle breathing, walking left/right, sleep, eating, attack and hurt as separate milestones. Validate bone lengths, stance contact, loop continuity, alpha seams and palette limits, then inspect actual native-resolution emulator video and compare with baseline. Measure runtime memory and frame rate on hardware before release. No claim of finished animation until actual art and video are reviewed.
