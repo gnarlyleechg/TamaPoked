@@ -24,6 +24,7 @@
 #include "linknow.h"
 #include "backs.h"
 #include "home_backs.h"
+#include "sprite_runs.h"
 #include "badges.h"
 #include "avatars.h"
 #include <stdarg.h>
@@ -6550,14 +6551,10 @@ void drawThumb(const uint8_t *b, int x, int y, int s, bool sil) {
   const uint8_t *d = pal + n * 2;
   int ox = x + (GAL_CELL - w * s) / 2;
   int oy = y + (GAL_CELL - h * s) / 2;
-  for (int r = 0; r < h; r++) {
-    for (int c = 0; c < w; c++) {
-      uint8_t idx = d[r * w + c];
-      if (idx == 0xFF) continue;
-      uint16_t col = sil ? INK_K : (uint16_t)(pal[idx * 2] | (pal[idx * 2 + 1] << 8));
-      gfx->fillRect(ox + c * s, oy + r * s, s, s, col);
-    }
-  }
+  forSpriteRuns(d, w, h, sil, [&](int x, int y, int len, uint8_t idx) {
+    uint16_t col = sil ? INK_K : (uint16_t)(pal[idx * 2] | (pal[idx * 2 + 1] << 8));
+    gfx->fillRect(ox + x * s, oy + y * s, len * s, s, col);
+  });
 }
 
 void renderGallery() {
@@ -6566,6 +6563,15 @@ void renderGallery() {
     gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
     const DexEntry &d = DEX_TBL[galleryDetail];
     bool reg = pet.isRegistered(galleryDetail);
+    // Only registered species reveal their accent color; unknown species
+    // keep the original silhouette and mystery label.
+    const uint16_t accent = reg ? d.accent : UI_TRACK;
+    gfx->fillRoundRect(62, 104, 342, 278, 24, UI_WHITE);
+    gfx->drawRoundRect(62, 104, 342, 278, 24, lerp565(UI_INK, accent, 3, 4));
+    gfx->fillCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 7, 8));
+    gfx->drawCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 3, 4));
+    gfx->fillRoundRect(CX - 72, 301, 144, 15, 7, lerp565(accent, UI_WHITE, 4, 5));
+    gfx->fillRoundRect(CX - 52, 303, 104, 7, 3, lerp565(accent, UI_WHITE, 2, 3));
     char head[24];
     snprintf(head, sizeof(head), "N.%03d %s%s", galleryDetail,
              pet.isShinyRegistered(galleryDetail) ? "*" : "", reg ? d.name : "???");
@@ -6580,8 +6586,16 @@ void renderGallery() {
       drawPmdActM(galleryPmd, PMD_IDLE, CX, 300, reg ? millis() : 0, true, !reg, 6);
     } else {
       const uint8_t *t = thumbs.get(galleryDetail);
-      if (t) drawThumb(t, CX - GAL_CELL, 135, 4, !reg);
+      if (t) {
+        // Center the real thumbnail and keep its feet over the stage.
+        int sc = 4;
+        while (sc > 1 && (t[0] * sc > 210 || t[1] * sc > 172)) --sc;
+        drawThumb(t, CX - GAL_CELL / 2,
+                  300 - (GAL_CELL + t[1] * sc) / 2, sc, !reg);
+      }
     }
+    gfx->fillRoundRect(CX - 65, 390, 130, 42, 16, UI_WHITE);
+    gfx->drawRoundRect(CX - 65, 390, 130, 42, 16, UI_INK);
     gfx->setTextColor(UI_INK);
     gfx->setTextSize(2);
     gfx->setCursor(CX - strlen(T(S_DETAIL_BACK)) * 6, 408);
@@ -6611,6 +6625,13 @@ void renderGallery() {
       int16_t dex = GAL_LO + galleryPage * GAL_PER_PAGE + r * 4 + c;
       if (dex > GAL_HI || dex > DEX_COUNT) break;
       int x = GAL_X + c * GAL_CELL, y = GAL_Y + r * GAL_CELL;
+      // Stay within the existing cell and let the round panel clip only the
+      // same peripheral cells as before. The cards add no new touch targets.
+      const bool known = pet.isRegistered(dex);
+      const uint16_t card = known ? lerp565(DEX_TBL[dex].accent, UI_WHITE, 7, 8)
+                                  : lerp565(UI_TRACK, UI_WHITE, 5, 6);
+      gfx->fillRoundRect(x + 3, y + 3, GAL_CELL - 6, GAL_CELL - 6, 10, card);
+      gfx->drawRoundRect(x + 3, y + 3, GAL_CELL - 6, GAL_CELL - 6, 10, UI_TRACK);
       const uint8_t *t = thumbs.get(dex);
       if (t) {
         drawThumb(t, x, y, 2, !pet.isRegistered(dex));
@@ -6654,6 +6675,9 @@ void galleryTap(int16_t x, int16_t y) {
     galleryPmd.unload();
     return;
   }
+  // C++ truncates negative division toward zero: guard the outer edges
+  // before dividing or taps just above/left of the grid select cell zero.
+  if (x < GAL_X || y < GAL_Y || x >= GAL_X + 4 * GAL_CELL || y >= GAL_Y + 4 * GAL_CELL) return;
   int c = (x - GAL_X) / GAL_CELL, r = (y - GAL_Y) / GAL_CELL;
   if (c < 0 || c > 3 || r < 0 || r > 3) return;
   int16_t dex = GAL_LO + galleryPage * GAL_PER_PAGE + r * 4 + c;
@@ -7060,14 +7084,9 @@ void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool
   // anclar por los pies (a.base), no por el alto del lienzo: asi las acciones
   // con padding distinto (Hurt, Eat...) quedan todas a la misma altura de suelo
   int x0 = cx - a.w * s / 2, y0 = groundY - (a.base ? a.base : a.h) * s;
-  for (int r = 0; r < a.h; r++) {
-    const uint8_t *row = fr + r * a.w;
-    for (int c = 0; c < a.w; c++) {
-      uint8_t idx = row[c];
-      if (idx == 0xFF) continue;
-      gfx->fillRect(x0 + c * s, y0 + r * s, s, s, sil ? INK_K : m.pal[idx]);
-    }
-  }
+  forSpriteRuns(fr, a.w, a.h, sil, [&](int x, int y, int len, uint8_t idx) {
+    gfx->fillRect(x0 + x * s, y0 + y * s, len * s, s, sil ? INK_K : m.pal[idx]);
+  });
 }
 void drawPmdAct(uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {
   drawPmdActM(pmd, actId, cx, groundY, t, loop, sil, maxS);
