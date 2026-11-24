@@ -2828,6 +2828,17 @@ void renderSack() {
   gfx->fillRoundRect(sx - 42, top, 84, 22, 18, C565(0x7e, 0x28, 0x28));   // tapa
   gfx->drawRoundRect(sx - 42, top, 84, 150, 26, ink);
   gfx->fillRect(sx - 42, top + 70, 84, 4, C565(0x7e, 0x28, 0x28));        // costura
+  // Shaded leather panels and a Pokeball emblem on the existing hit target.
+  // Keep all decoration inside the moving bag, never change its hitbox.
+  gfx->fillRoundRect(sx - 34, top + 23, 13, 101, 6, C565(213, 100, 91));
+  gfx->fillRoundRect(sx + 24, top + 24, 10, 100, 5, C565(119, 35, 40));
+  gfx->fillRoundRect(sx - 24, top + 112, 48, 5, 2, C565(235, 142, 124));
+  gfx->fillCircle(sx, top + 68, 26, UI_INK);
+  gfx->fillCircle(sx, top + 68, 23, UI_WHITE);
+  gfx->fillRoundRect(sx - 20, top + 47, 40, 21, 9, C565(226, 63, 55));
+  gfx->drawFastHLine(sx - 22, top + 68, 45, UI_INK);
+  gfx->fillCircle(sx, top + 68, 8, UI_INK);
+  gfx->fillCircle(sx, top + 68, 5, UI_WHITE);
 
   // contador de golpes
   char buf[8];
@@ -4713,9 +4724,19 @@ void renderSpeed() {
   int life = spdLife();
   int r = SPD_R - (int)((uint32_t)SPD_R * age / (life ? life : 1) / 2);
   if (r < 8) r = 8;
-  gfx->fillCircle(spdX, spdY, r, UI_BAR_BAD);
-  gfx->fillCircle(spdX, spdY, r * 2 / 3, UI_WHITE);
-  gfx->fillCircle(spdX, spdY, r / 3, UI_BAR_BAD);
+  // Pokeball-style reaction target, with the same animated radius and center.
+  gfx->fillCircle(spdX, spdY, r, UI_INK);
+  const int inner = r - 2;
+  gfx->fillCircle(spdX, spdY, inner, UI_WHITE);
+  // Draw only the upper hemisphere, bounded by the original target circle.
+  for (int dy = -inner; dy < 0; ++dy) {
+    int dx = 0;
+    while ((dx + 1) * (dx + 1) + dy * dy <= inner * inner) ++dx;
+    gfx->drawFastHLine(spdX - dx, spdY + dy, 2 * dx + 1, C565(221, 60, 51));
+  }
+  gfx->drawFastHLine(spdX - inner, spdY, 2 * inner + 1, UI_INK);
+  gfx->fillCircle(spdX, spdY, r / 3, UI_INK);
+  gfx->fillCircle(spdX, spdY, r / 3 - 1, UI_WHITE);
 
   char b[12];
   snprintf(b, sizeof(b), "%u", spdHits);
