@@ -25,6 +25,7 @@
 #include "backs.h"
 #include "home_backs.h"
 #include "sprite_runs.h"
+#include "sprite_fit.h"
 #include "badges.h"
 #include "avatars.h"
 #include <stdarg.h>
@@ -7164,12 +7165,11 @@ uint8_t pmdFrameAt(const PmdAct &a, uint32_t t, bool loop) {
 // dibuja una accion de un PmdMon concreto (m); drawPmdAct usa el global pmd
 void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {
   const PmdAct &a = m.acts[actId];
-  if (!a.frames) return;
-  uint8_t sBase = m.acts[PMD_IDLE].h ? 170 / m.acts[PMD_IDLE].h : 5;
-  if (sBase < 2) sBase = 2;
-  if (sBase > maxS) sBase = maxS;
-  uint8_t s = sBase;
-  while (s > 2 && a.h * s > 250) s--;  // acciones con frame grande (ataque)
+  if (!a.frames || !a.data || !a.w || !a.h || !maxS) return;
+  // Native scale is important for high-res frames. Keep even the largest
+  // valid uint8_t-sized legacy frame drawable at 1x.
+  uint8_t s = spriteFitScale(m.acts[PMD_IDLE].h, a.w, a.h, maxS, 255, 255);
+  if (!s) return;
   uint8_t fi = pmdFrameAt(a, t, loop);
   const uint8_t *fr = a.data + (uint32_t)fi * a.w * a.h;
   // anclar por los pies (a.base), no por el alto del lienzo: asi las acciones
