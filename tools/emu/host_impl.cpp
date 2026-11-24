@@ -41,13 +41,14 @@ static uint8_t *slurp(const std::string &path, uint32_t *size) {
 bool PmdMon::load(int16_t dexNum, bool shiny) {
   if (dexNum < 1 || dexNum > 999) return false;
   unload();
-  char p[64];
-  snprintf(p, sizeof(p), "%s/p%s%03u.bin", g_spriteDir.c_str(), shiny ? "s" : "", (unsigned)dexNum);
+  // CI checkout paths can exceed 64 bytes. Format only the basename.
+  char name[24];
+  snprintf(name, sizeof(name), "/p%s%03u.bin", shiny ? "s" : "", (unsigned)dexNum);
   uint32_t size = 0;
-  blob = slurp(p, &size);
-  if (!blob) {
-    snprintf(p, sizeof(p), "%s/p%03u.bin", g_spriteDir.c_str(), (unsigned)dexNum);
-    blob = slurp(p, &size);
+  blob = slurp(g_spriteDir + name, &size);
+  if (!blob && shiny) {
+    snprintf(name, sizeof(name), "/p%03u.bin", (unsigned)dexNum);
+    blob = slurp(g_spriteDir + name, &size);
   }
   if (!blob) return false;
   if (size < 7 || memcmp(blob, "TPK2", 4) != 0) { unload(); return false; }
