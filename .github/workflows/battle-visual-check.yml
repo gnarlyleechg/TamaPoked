@@ -52,6 +52,33 @@ jobs:
           test -s gallerydetail.ppm
           test -s treasure.ppm
           test -s treasure__opened_.ppm
+      - name: Exercise four canonical official-artwork portraits
+        if: github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/portrait-venv"
+          "$RUNNER_TEMP/portrait-venv/bin/pip" install Pillow==11.3.0
+          ROOT="$PWD"
+          EMU="$ROOT/tools/emu/tamapoke-emu"
+          mkdir -p "$RUNNER_TEMP/portrait-pilot"
+          cd "$RUNNER_TEMP/portrait-pilot"
+          for dex in 1 4 7 25; do
+            rm -f tamapoke.nvs
+            "$EMU" --shot portraitpilot --dex "$dex" --out "fallback-$dex.ppm"
+            url="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/$dex.png"
+            curl --fail --location --retry 2 --max-time 60 "$url" -o "$dex.png"
+            "$RUNNER_TEMP/portrait-venv/bin/python" "$ROOT/tools/pack_portrait.py" "$dex.png" --dex "$dex" --source "$url" --rights "Copyright respective owners; temporary evaluation only; no redistribution" --out "$ROOT/tools/sdcard/mons"
+            rm -f tamapoke.nvs
+            "$EMU" --shot portraitpilot --dex "$dex" --out "portrait-$dex.ppm"
+            test -s "portrait-$dex.ppm"
+            if cmp -s "fallback-$dex.ppm" "portrait-$dex.ppm"; then
+              echo "Portrait $dex did not change rendered frame"; exit 1
+            fi
+            echo "PASS: canonical portrait $dex changes real emulator frame"
+          done
+          # Do not publish the downloaded art or screenshots containing it.
+          rm -f "$ROOT"/tools/sdcard/mons/*.tpa "$ROOT"/tools/sdcard/mons/portrait-manifest.json
+          cd "$ROOT"
+          rm -rf "$RUNNER_TEMP/portrait-pilot"
       - uses: actions/upload-artifact@v4
         with:
           name: battle-visual-emulator-screens
