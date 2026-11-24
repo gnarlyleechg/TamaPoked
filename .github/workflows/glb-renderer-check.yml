@@ -4,6 +4,7 @@ on:
     branches: [codex/tamapoke-battle-scene-polish]
     paths:
       - 'tools/render_glb_walk.py'
+      - 'tools/bake_pokemon_walk.py'
       - 'tools/import_local_glb.py'
       - 'tools/merge_walk_pilot.py'
       - 'tools/local_palette.py'
@@ -60,10 +61,11 @@ jobs:
       - name: Test local importer with original game sprite
         run: |
           /usr/bin/python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
-          /usr/bin/python3 tools/import_local_glb.py "$RUNNER_TEMP/fixture.glb" --dex 1 --clip fixture_walk --original tools/sdcard/mons/p001.bin --out "$RUNNER_TEMP/local-import" --rights "Original engineering fixture"
+          /usr/bin/python3 tools/import_local_glb.py "$RUNNER_TEMP/fixture.glb" --dex 1 --clip fixture_walk --idle-clip fixture_walk --original tools/sdcard/mons/p001.bin --out "$RUNNER_TEMP/local-import" --rights "Original engineering fixture"
           test -s "$RUNNER_TEMP/local-import/p001.bin"
           test -s "$RUNNER_TEMP/local-import/provenance.json"
           test -s "$RUNNER_TEMP/local-import/walk.gif"
+          /usr/bin/python3 -c 'import sys; sys.path.insert(0,"tools"); from merge_walk_pilot import read; p,a=read(sys.argv[1]); assert all(a[k][2]==12 for k in (0,1,2)); print("PASS: matching idle and both walk clips")' "$RUNNER_TEMP/local-import/p001.bin"
       - name: Render imported fixture in actual living room
         run: |
           ROOT="$PWD"
