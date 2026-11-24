@@ -33,9 +33,9 @@ d.ellipse((23,82,43,99),fill=(245,238,222),outline=(37,75,64))
 d.ellipse((24,83,34,98),fill=(169,45,57));d.ellipse((25,85,29,90),fill="white")
 d.arc((15,93,49,106),10,150,fill=(37,75,64),width=2)
 limbs=[]
-for i,(a,b,c) in enumerate([((53,103),(48,119),(52,139)),((66,105),(63,122),(59,139)),((112,103),(120,120),(116,139)),((126,103),(132,121),(129,139))]):
+for i,(a,b,c) in enumerate([((48,103),(43,119),(47,139)),((68,105),(63,122),(62,139)),((106,103),(113,120),(108,139)),((130,103),(137,121),(133,139))]):
     color=(75,140,121) if i%2==0 else (99,175,147)
-    limbs.append((a,b,c,segment(a,b,10,color),segment(b,c,9,color)))
+    limbs.append((a,b,c,segment(a,b,8,color),segment(b,c,7,color)))
 frames=bake(1,body,limbs)
 out=Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
 (out/"bulbasaur-pilot.tpk2").write_bytes(pack_walk(frames))
