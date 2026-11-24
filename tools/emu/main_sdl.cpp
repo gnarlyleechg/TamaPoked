@@ -7,6 +7,7 @@
 #include "pet.h"
 #include "party.h"
 #include "battle.h"
+#include "trainers.h"
 #include "moves.h"
 #include "sdmon.h"
 #include <chrono>
@@ -152,7 +153,8 @@ extern int16_t galleryDetail;
 extern int galleryPage;
 void galleryTap(int16_t, int16_t);
 extern uint8_t galleryRegion;
-extern uint8_t gymRegion;
+extern uint8_t gymRegion, btlRegion;
+extern int8_t btlTrainer;
 extern bool gymPick, galleryPick;
 int wavMain(const char *path, const char *demo);
 extern bool lanOpen;
@@ -174,6 +176,9 @@ extern uint8_t pickTrainer, pickPage;
 void pickDefault(uint8_t cap);
 extern bool pickHard;
 void startSpeedGame();
+void startSack();
+void startGame();
+extern bool sackOpen, gameOpen, spdOpen;
 void setup();
 void loop();
 void render();
@@ -446,7 +451,31 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     pickDefault(6); pickOpen = true;
   }
   else if (!strcmp(screen, "gymshard")) { gymOpen = true; gymHard = true; pet.badgesHard = 0x03; }
-  else if (!strcmp(screen, "speed")) { startSpeedGame(); }
+  else if (!strcmp(screen, "speed") || !strcmp(screen, "sack") || !strcmp(screen, "ball")) {
+    pet.ceremony = CER_NONE; pet.sleeping = false;
+    if (!strcmp(screen, "speed")) { startSpeedGame(); if (!spdOpen) return 3; }
+    else if (!strcmp(screen, "sack")) { startSack(); if (!sackOpen) return 3; }
+    else { startGame(); if (!gameOpen) return 3; }
+  }
+  else if (!strncmp(screen, "gymday-", 7) || !strncmp(screen, "gymnight-", 9)) {
+    const bool night = !strncmp(screen, "gymnight-", 9);
+    const char *args = screen + (night ? 9 : 7);
+    // Fixed, bounded decimal format; reject malformed and out-of-range captures.
+    const size_t len = strlen(args);
+    if (len < 3 || len > 4 || args[0] < '0' || args[0] > '9' || args[1] != '-') return 2;
+    int region = args[0] - '0', trainer = 0;
+    for (size_t i=2; i<len; ++i) {
+      if (args[i] < '0' || args[i] > '9') return 2;
+      trainer = trainer*10 + args[i]-'0';
+    }
+    if (region >= GYM_REGIONS || trainer >= TRAINER_COUNT) return 2;
+    pet.ceremony = CER_NONE; pet.sleeping = false;
+    pet.dbgSetSeen((night ? 23UL : 13UL) * 3600);
+    gymRegion = uint8_t(region);
+    pickDefault(TRAINER_TEAM_MAX);
+    startTrainerBattle(uint8_t(trainer), false);
+    if (!battleOpen || btlRegion != region || btlTrainer != trainer) return 3;
+  }
   else if (!strcmp(screen, "avatars")) {
     pet.renameTrainer("DYLAN");
     playerOpen = true;
