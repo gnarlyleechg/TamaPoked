@@ -185,6 +185,7 @@ void chessTap(int16_t x, int16_t y);
 void chessAiStep(uint32_t now);
 void renderShop();
 void shopTap(int16_t x, int16_t y);
+bool startWildBattle();
 void openClock();            // defined further down; loop() opens it from the BOOT button
 int clockH = 12, clockM = 0;  // hora en edicion
 
@@ -242,6 +243,7 @@ uint32_t chessAiAt = 0, chessQuitUntil = 0;
 uint8_t chessEarned = 0;
 ChessResult chessRes = CHR_PLAYING;
 bool shopOpen = false;        // the coin shop (menu row)
+uint8_t shopTab = 0;          // 0 care, 1 battle items
 char shopMsg[28] = "";
 uint32_t shopMsgUntil = 0;
 
@@ -457,6 +459,7 @@ static_assert(PDET_R_X > PDET_L_X + PDET_L_W + 8,
               "the destructive button needs a real dead gap before it");
 
 uint8_t gymRegion = 0;
+uint32_t gymWildMsgUntil = 0;
 uint8_t btlRegion = 0;
 #define TRAINERS (TRAINER_SETS[gymRegion % GYM_REGIONS].list)
 #define BTL_TRAINERS (TRAINER_SETS[btlRegion % GYM_REGIONS].list)
@@ -506,6 +509,11 @@ uint8_t playerPage = 0;
 uint8_t gymPage = 0;
 #define GYM_ROWS 5
 #define GYM_ROW_Y(i) (110 + (i) * 50)
+#define GYM_ACTION_Y 372
+#define GYM_ACTION_H UI_TAP_MIN
+#define GYM_ACTION_W 136
+#define GYM_WILD_X 93
+#define GYM_LAN_X 237
 int8_t btlTrainer = -1;      // index into TRAINERS, -1 = a one-off fight
 bool btlHard = false;
 Combatant btlSquad[TRAINER_TEAM_MAX + 1];
@@ -534,8 +542,14 @@ uint32_t btlEnterUntil[2] = { 0, 0 };
 int8_t btlSwapWho = -1;        // 0 = your side, 1 = the foe's, -1 = nothing due
 #define BTL_FAINT_MS 700
 #define BTL_ENTER_MS 420
-// battle menu: 0 = FIGHT/POKEMON, 1 = the moves, 2 = the switch list
+// battle menu: 0 = actions, 1 = moves, 2 = switch list, 3 = run confirm, 4 = items
 uint8_t btlMenu = 0;
+static const StrId BTL_ITEM_NAME[BI_COUNT] = {
+  S_ITEM_POTION, S_ITEM_SUPER_POTION, S_ITEM_FULL_HEAL
+};
+static const StrId BTL_ITEM_DESC[BI_COUNT] = {
+  S_ITEM_POTION_DESC, S_ITEM_SUPER_POTION_DESC, S_ITEM_FULL_HEAL_DESC
+};
 #define BTL_LUNGE_MS 500
 #define BTL_HIT_MS 420
 char btlMsg[6][40];
@@ -1888,12 +1902,19 @@ void onTap(int16_t x, int16_t y) {
       sfxPlay(SFX_TAP);
       return;
     }
-    if (y >= 380 && y <= 412 && x >= 148 && x <= 318) {   // LAN battle
-      gymOpen = false;
-      lan.state = LINK_OFF;
-      lanOpen = true;
-      sfxPlay(SFX_TAP);
-      return;
+    if (y >= GYM_ACTION_Y && y <= GYM_ACTION_Y + GYM_ACTION_H) {
+      if (x >= GYM_WILD_X && x <= GYM_WILD_X + GYM_ACTION_W) {
+        if (startWildBattle()) sfxPlay(SFX_TAP);
+        else { gymWildMsgUntil = millis() + 1800; sfxPlay(SFX_DENY); }
+        return;
+      }
+      if (x >= GYM_LAN_X && x <= GYM_LAN_X + GYM_ACTION_W) {
+        gymOpen = false;
+        lan.state = LINK_OFF;
+        lanOpen = true;
+        sfxPlay(SFX_TAP);
+        return;
+      }
     }
     for (int i = 0; i < GYM_ROWS; i++) {
       uint8_t idx = gymPage * GYM_ROWS + i;
@@ -1967,7 +1988,7 @@ void onTap(int16_t x, int16_t y) {
           if (!pet.ceremony && !confirmUntil) { gymOpen = true; gymPick = true; gymPage = 0; rpickPage = 0; }
           break;
         case 3: if (!pet.ceremony && !confirmUntil) partyOpen = true; break;
-        case 4: shopOpen = true; shopMsg[0] = 0; break;
+        case 4: shopOpen = true; shopTab = 0; shopMsg[0] = 0; break;
         case 5: chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; break;
         case 6: actOpen = true; actState = 0; actMsg[0] = 0; break;
         case 7: openClock(); break;
@@ -3749,6 +3770,13 @@ void startTrainerBattle(uint8_t idx, bool hard) {
 
 void startBattle(int16_t dex, uint8_t lvl) {
   if (pet.isEgg() || pet.ceremony != CER_NONE) return;
+  btlTrainer = -1;
+  btlHard = false;
+  btlRegion = pet.region;
+  btlLink = false;
+  btlLinkHost = false;
+  btlMyAct = 0;
+  btlFoeSquadN = 0;
   if (dex < 1 || dex > DEX_COUNT) return;
   buildSquad(0, TRAINER_TEAM_MAX, 0xFFFF);
   if (!btlSquadN) return;
@@ -3777,6 +3805,20 @@ void startBattle(int16_t dex, uint8_t lvl) {
   btlLungeUntil[0] = btlLungeUntil[1] = 0;
   btlHitUntil[0] = btlHitUntil[1] = 0;
   battleOpen = true;
+}
+
+bool startWildBattle() {
+  if (pet.isEgg() || pet.ceremony != CER_NONE) return false;
+  const int16_t dex = battleWildSpecies(gymRegion, (uint16_t)random(65535));
+  if (dex < 1) return false;
+  int16_t level = (int16_t)pet.level() + (int16_t)random(6) - 3;
+  if (level < 1) level = 1;
+  if (level > 100) level = 100;
+  startBattle(dex, (uint8_t)level);
+  if (!battleOpen) return false;
+  btlRegion = gymRegion;
+  btlSay(T(S_WILD_APPEARED_FMT), btlFoe.name);
+  return true;
 }
 
 // The guest's whole turn: copy in what the host resolved and play the same
@@ -3928,12 +3970,14 @@ static void btlResolve(uint8_t yourMove) {
   btlLungeUntil[0] = btlLungeUntil[1] = 0;
   btlHitUntil[0] = btlHitUntil[1] = 0;
   const uint16_t hpA = a->hp, hpB = b->hp;
-  battleAct(*a, *b, ma, lg);
-  if (a->hp < hpA) btlHitUntil[first] = now + BTL_HIT_MS;
-  if (b->hp < hpB) btlHitUntil[second] = now + BTL_HIT_MS;
-  btlNarrate(*a, *b, lg);
-  if (lg.damage && !lg.hurtSelf) btlLungeUntil[first] = now + BTL_LUNGE_MS;
-  if (!b->fainted()) {
+  if (ma) {
+    battleAct(*a, *b, ma, lg);
+    if (a->hp < hpA) btlHitUntil[first] = now + BTL_HIT_MS;
+    if (b->hp < hpB) btlHitUntil[second] = now + BTL_HIT_MS;
+    btlNarrate(*a, *b, lg);
+    if (lg.damage && !lg.hurtSelf) btlLungeUntil[first] = now + BTL_LUNGE_MS;
+  }
+  if (!b->fainted() && mb) {
     const uint16_t replyHpA = a->hp, replyHpB = b->hp;
     const uint32_t replyAt = now + BTL_LUNGE_MS;
     battleAct(*b, *a, mb, lg);
@@ -3999,7 +4043,7 @@ static void btlResolve(uint8_t yourMove) {
     if (btlLink && btlLinkHost) lan.sendEnd(btlWon);
     if (btlLink) { btlSay("%s", btlWon ? T(S_BTL_WIN) : T(S_BTL_LOSE)); return; }
     if (btlWon && btlTrainer >= 0) { btlWinUntil = millis() + 60000; return; }
-    btlSay("%s", T(S_BTL_LOSE));
+    btlSay("%s", btlWon ? T(S_BTL_WIN) : T(S_BTL_LOSE));
   }
 }
 
@@ -4269,23 +4313,19 @@ void renderBattle() {
     gfx->setCursor(CX - 30, BTL_GRID_Y + 84);
     gfx->print("tap...");
   } else if (btlMenu == 0) {
-    // FIGHT across the top, then POKEMON and RUN side by side. Three full-width
-    // rows do not fit: the panel is round, and at that depth the chord is only
-    // ~250 px. The lower two reuse the move grid's cells, so they inherit its
-    // padded hit areas -- which is what made POKEMON hard to press before.
-    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_BG_DAY);
-    gfx->setTextColor(UI_INK);
-    gfx->setTextSize(2);
-    gfx->setCursor(CX - (int)strlen(T(S_FIGHT)) * 6, BTL_GRID_Y + 14);
-    gfx->print(T(S_FIGHT));
-    const char *low[2] = { T(S_BTL_SWITCH), T(S_BTL_RUN) };
-    for (int i = 0; i < 2; i++) {
-      int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, UI_TRACK);
-      gfx->setTextColor(UI_INK);
+    static const StrId ACTIONS[4] = {
+      S_FIGHT, S_BTL_ITEM, S_BTL_SWITCH, S_BTL_RUN
+    };
+    for (int i = 0; i < 4; i++) {
+      const bool enabled = !(i == 1 && btlLink);
+      const int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H,
+                    enabled ? (i < 2 ? UI_BG_DAY : UI_TRACK) : UI_TRACK);
+      gfx->setTextColor(enabled ? UI_INK : 0x8410);
       gfx->setTextSize(2);
-      gfx->setCursor(x + (BTL_CELL_W - (int)strlen(low[i]) * 12) / 2, y + 14);
-      gfx->print(low[i]);
+      const char *label = T(ACTIONS[i]);
+      gfx->setCursor(x + (BTL_CELL_W - (int)strlen(label) * 12) / 2, y + 14);
+      gfx->print(label);
     }
   } else if (btlMenu == 3) {           // "Run away?" -- YES left, NO under the old RUN spot
     btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_WHITE);
@@ -4301,6 +4341,23 @@ void renderBattle() {
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(yn[i]) * 12) / 2, y + 14);
       gfx->print(yn[i]);
+    }
+  } else if (btlMenu == 4) {
+    drawBtlBack();
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      const int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
+      const bool owned = pet.battleItems[i] != 0;
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, owned ? UI_BG_DAY : UI_TRACK);
+      gfx->setTextColor(owned ? UI_INK : 0x8410);
+      gfx->setTextSize(1);
+      gfx->setCursor(x + 8, y + 8);
+      gfx->print(T(BTL_ITEM_NAME[i]));
+      gfx->setCursor(x + 8, y + 22);
+      gfx->print(T(BTL_ITEM_DESC[i]));
+      char count[8];
+      snprintf(count, sizeof(count), "x%u", (unsigned)pet.battleItems[i]);
+      gfx->setCursor(x + BTL_CELL_W - (int)strlen(count) * 6 - 8, y + 34);
+      gfx->print(count);
     }
   } else if (btlMenu == 2) {
     drawBtlBack();
@@ -4461,14 +4518,45 @@ void battleTap(int16_t x, int16_t y) {
     return;
   }
   if (btlMenu == 0) {
-    if (x >= BTL_GRID_X - BTL_HIT_PAD && x <= BTL_GRID_X + 328 + BTL_HIT_PAD &&
-        y >= BTL_HIT_Y0(0) && y <= BTL_HIT_Y1(0)) {
+    if (btlCellHit(0, x, y)) { sfxPlay(SFX_TAP); btlMenu = 1; return; }
+    if (btlCellHit(1, x, y)) {
+      if (btlLink) { sfxPlay(SFX_DENY); return; }
       sfxPlay(SFX_TAP);
-      btlMenu = 1;                       // FIGHT
+      btlMenu = 4;
       return;
     }
     if (btlCellHit(2, x, y)) { sfxPlay(SFX_TAP); btlMenu = 2; return; }
-    if (btlCellHit(3, x, y)) { sfxPlay(SFX_TAP); btlMenu = 3; return; }   // asks first
+    if (btlCellHit(3, x, y)) { sfxPlay(SFX_TAP); btlMenu = 3; return; }
+    return;
+  }
+  if (btlMenu == 4) {
+    if (btlBackTap(x, y)) return;
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      if (!btlCellHit(i, x, y)) continue;
+      if (!pet.battleItems[i]) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_NO_ITEMS));
+        return;
+      }
+      Combatant healed = btlYou;
+      if (!battleApplyItem(healed, i)) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_ITEM_NO_EFFECT));
+        return;
+      }
+      if (!pet.consumeBattleItem(i)) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_NO_ITEMS));
+        return;
+      }
+      btlYou = healed;
+      btlSquad[btlSquadAt] = btlYou;
+      btlMenu = 0;
+      sfxPlay(SFX_HEART);
+      btlSay(T(S_BTL_USED_ITEM_FMT), btlYou.name, T(BTL_ITEM_NAME[i]));
+      btlResolve(0);                 // the opponent still gets its turn
+      return;
+    }
     return;
   }
   if (btlMenu == 3) {         // only an explicit YES leaves the fight
@@ -5188,16 +5276,24 @@ void renderGyms() {
   uint8_t pages = (TRAINER_COUNT + GYM_ROWS - 1) / GYM_ROWS;
   for (uint8_t i = 0; i < pages; i++) {
     int dx = CX - (pages - 1) * 13 + i * 26;
-    if (i == gymPage) gfx->fillCircle(dx, 366, 5, UI_INK);
-    else gfx->drawCircle(dx, 366, 4, UI_INK);
+    if (i == gymPage) gfx->fillCircle(dx, 362, 5, UI_INK);
+    else gfx->drawCircle(dx, 362, 4, UI_INK);
   }
-  // the other kind of battle lives here too
-  gfx->fillRoundRect(148, 380, 170, 32, 9, UI_BG_DAY);
-  gfx->drawRoundRect(148, 380, 170, 32, 9, UI_INK);
-  gfx->setTextColor(UI_INK);
-  gfx->setTextSize(2);
-  gfx->setCursor(CX - strlen(T(S_LAN)) * 6, 388);
-  gfx->print(T(S_LAN));
+  const int actionX[2] = { GYM_WILD_X, GYM_LAN_X };
+  const StrId actionLabel[2] = { S_WILD, S_LAN };
+  for (uint8_t i = 0; i < 2; i++) {
+    gfx->fillRoundRect(actionX[i], GYM_ACTION_Y, GYM_ACTION_W, GYM_ACTION_H,
+                       10, UI_BG_DAY);
+    gfx->drawRoundRect(actionX[i], GYM_ACTION_Y, GYM_ACTION_W, GYM_ACTION_H,
+                       10, UI_INK);
+    const bool noWild = i == 0 && gymWildMsgUntil && millis() < gymWildMsgUntil;
+    const char *label = noWild ? T(S_WILD_NONE) : T(actionLabel[i]);
+    gfx->setTextColor(noWild ? UI_BAR_BAD : UI_INK);
+    gfx->setTextSize(noWild ? 1 : 2);
+    gfx->setCursor(CX - (int)strlen(label) * (noWild ? 3 : 6) +
+                   (i == 0 ? -70 : 70), GYM_ACTION_Y + (noWild ? 18 : 14));
+    gfx->print(label);
+  }
   gfx->flush();
 }
 
@@ -6272,61 +6368,123 @@ static const ShopItem SHOP_ITEMS[] = {
   { "VITAMIN",      "trains a stat",    30, 12 },
 };
 #define SHOP_COUNT ((int)(sizeof(SHOP_ITEMS) / sizeof(SHOP_ITEMS[0])))
-#define SHOP_X 63
-#define SHOP_Y 70
-#define SHOP_W 340
-#define SHOP_H 330
-#define SHOP_ROW_H 46
-#define SHOP_ROW_Y(i) (SHOP_Y + 62 + (i) * (SHOP_ROW_H + 6))
+static const uint16_t BTL_ITEM_COST[BI_COUNT] = { 8, 18, 12 };
+static const uint8_t BTL_ITEM_UNLOCK[BI_COUNT] = { 0, 3, 6 };
+#define SHOP_X 93
+#define SHOP_Y 45
+#define SHOP_W 280
+#define SHOP_H 375
+#define SHOP_TAB_Y 95
+#define SHOP_TAB_H 40
+#define SHOP_TAB_W 126
+#define SHOP_TAB_X(i) (SHOP_X + 12 + (i) * 134)
+#define SHOP_ROW_H 45
+#define SHOP_ROW_Y(i) (SHOP_Y + 100 + (i) * 47)
+#define SHOP_BATTLE_ROW_H 60
+#define SHOP_BATTLE_ROW_Y(i) (SHOP_Y + 100 + (i) * 75)
 
 void renderShop() {
-  // A plain dark backdrop: dimming the previous frame let the menu behind it show through.
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, gNight ? 0x0000 : 0x2104);
   gfx->fillRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_WHITE);
   gfx->drawRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_INK);
 
-  char b[32];
+  char b[40];
   gfx->setTextColor(UI_INK);
   gfx->setTextSize(2);
   snprintf(b, sizeof(b), "%s  -  %u", T(S_SHOP), (unsigned)pet.coins);
-  gfx->setCursor(CX - (int)strlen(b) * 6, SHOP_Y + 12);
+  gfx->setCursor(CX - (int)strlen(b) * 6, SHOP_Y + 8);
   gfx->print(b);
   gfx->setTextSize(1);
   gfx->setTextColor(UI_TRACK);
   snprintf(b, sizeof(b), T(S_STEPS_FMT), (unsigned)pet.stepsToday);
-  gfx->setCursor(CX - (int)strlen(b) * 3, SHOP_Y + 36);
+  gfx->setCursor(CX - (int)strlen(b) * 3, SHOP_Y + 31);
   gfx->print(b);
 
-  uint16_t have = pet.registeredCount();
-  for (int i = 0; i < SHOP_COUNT; i++) {
-    const ShopItem &it = SHOP_ITEMS[i];
-    int y = SHOP_ROW_Y(i);
-    bool locked = have < it.need;
-    bool poor = !locked && pet.coins < it.cost;
-    gfx->fillRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, locked ? UI_TRACK : UI_BG_DAY);
-    gfx->drawRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, UI_INK);
-    gfx->setTextColor(locked ? 0x8410 : UI_INK);
+  static const StrId tabs[2] = { S_SHOP_CARE_TAB, S_SHOP_BATTLE_TAB };
+  for (uint8_t i = 0; i < 2; i++) {
+    const int x = SHOP_TAB_X(i);
+    const bool selected = shopTab == i;
+    gfx->fillRoundRect(x, SHOP_TAB_Y, SHOP_TAB_W, SHOP_TAB_H, 10,
+                       selected ? UI_INK : UI_TRACK);
+    gfx->drawRoundRect(x, SHOP_TAB_Y, SHOP_TAB_W, SHOP_TAB_H, 10, UI_INK);
+    gfx->setTextColor(selected ? UI_WHITE : UI_INK);
     gfx->setTextSize(2);
-    gfx->setCursor(SHOP_X + 30, y + 6);
-    gfx->print(it.name);
-    gfx->setTextSize(1);
-    if (locked) snprintf(b, sizeof(b), "collect %u Pokemon", (unsigned)it.need);
-    else snprintf(b, sizeof(b), "%s", it.desc);
-    gfx->setCursor(SHOP_X + 30, y + 30);
-    gfx->print(b);
-    if (!locked) {
+    const char *label = T(tabs[i]);
+    gfx->setCursor(x + (SHOP_TAB_W - (int)strlen(label) * 12) / 2,
+                   SHOP_TAB_Y + 12);
+    gfx->print(label);
+  }
+
+  uint16_t have = pet.registeredCount();
+  if (shopTab == 0) {
+    for (int i = 0; i < SHOP_COUNT; i++) {
+      const ShopItem &it = SHOP_ITEMS[i];
+      const int y = SHOP_ROW_Y(i);
+      const bool locked = have < it.need;
+      const bool poor = !locked && pet.coins < it.cost;
+      gfx->fillRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_ROW_H, 10,
+                         locked ? UI_TRACK : UI_BG_DAY);
+      gfx->drawRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_ROW_H, 10, UI_INK);
+      gfx->setTextColor(locked ? 0x8410 : UI_INK);
       gfx->setTextSize(2);
-      gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
-      snprintf(b, sizeof(b), "%u", (unsigned)it.cost);
-      gfx->setCursor(SHOP_X + SHOP_W - 30 - (int)strlen(b) * 12, y + 14);
+      gfx->setCursor(SHOP_X + 26, y + 5);
+      gfx->print(it.name);
+      gfx->setTextSize(1);
+      if (locked) snprintf(b, sizeof(b), T(S_SHOP_UNLOCK_FMT), (unsigned)it.need);
+      else snprintf(b, sizeof(b), "%s", it.desc);
+      gfx->setCursor(SHOP_X + 26, y + 29);
       gfx->print(b);
+      if (!locked) {
+        gfx->setTextSize(2);
+        gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
+        snprintf(b, sizeof(b), "%u", (unsigned)it.cost);
+        gfx->setCursor(SHOP_X + SHOP_W - 25 - (int)strlen(b) * 12, y + 13);
+        gfx->print(b);
+      }
+    }
+  } else {
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      const int y = SHOP_BATTLE_ROW_Y(i);
+      const bool locked = have < BTL_ITEM_UNLOCK[i];
+      const bool full = pet.battleItems[i] >= 99;
+      const bool poor = !locked && pet.coins < BTL_ITEM_COST[i];
+      const bool enabled = !locked && !full;
+      gfx->fillRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_BATTLE_ROW_H, 10,
+                         enabled ? UI_BG_DAY : UI_TRACK);
+      gfx->drawRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_BATTLE_ROW_H, 10, UI_INK);
+      gfx->setTextColor(enabled ? UI_INK : 0x8410);
+      gfx->setTextSize(2);
+      gfx->setCursor(SHOP_X + 26, y + 5);
+      gfx->print(T(BTL_ITEM_NAME[i]));
+      gfx->setTextSize(1);
+      gfx->setCursor(SHOP_X + 26, y + 30);
+      gfx->print(full ? T(S_SHOP_FULL) : T(BTL_ITEM_DESC[i]));
+      char owned[8];
+      snprintf(owned, sizeof(owned), "x%u", (unsigned)pet.battleItems[i]);
+      gfx->setTextColor(UI_INK);
+      gfx->setCursor(SHOP_X + SHOP_W - 24 - (int)strlen(owned) * 6, y + 8);
+      gfx->print(owned);
+      if (!locked && !full) {
+        char cost[8];
+        snprintf(cost, sizeof(cost), "%u", (unsigned)BTL_ITEM_COST[i]);
+        gfx->setTextSize(2);
+        gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
+        gfx->setCursor(SHOP_X + SHOP_W - 24 - (int)strlen(cost) * 12, y + 31);
+        gfx->print(cost);
+      }
+      if (locked) {
+        gfx->setTextSize(1);
+        snprintf(b, sizeof(b), T(S_SHOP_UNLOCK_FMT), (unsigned)BTL_ITEM_UNLOCK[i]);
+        gfx->setCursor(SHOP_X + 26, y + 44);
+        gfx->print(b);
+      }
     }
   }
   if (shopMsg[0] && millis() < shopMsgUntil) {
     gfx->setTextSize(1);
     gfx->setTextColor(UI_INK);
-    gfx->setCursor(CX - (int)strlen(shopMsg) * 3, SHOP_Y + SHOP_H - 20);
+    gfx->setCursor(CX - (int)strlen(shopMsg) * 3, SHOP_Y + SHOP_H - 15);
     gfx->print(shopMsg);
   }
   gfx->flush();
@@ -6338,18 +6496,52 @@ static void shopSay(const char *m) {
 }
 
 void shopTap(int16_t x, int16_t y) {
-  bool inPanel = (x >= SHOP_X && x <= SHOP_X + SHOP_W && y >= SHOP_Y && y <= SHOP_Y + SHOP_H);
-  if (!inPanel) { shopOpen = false; return; }       // tap outside = back
-  for (int i = 0; i < SHOP_COUNT; i++) {
-    int ry = SHOP_ROW_Y(i);
-    if (x < SHOP_X + 18 || x > SHOP_X + SHOP_W - 18 || y < ry || y > ry + SHOP_ROW_H) continue;
-    const ShopItem &it = SHOP_ITEMS[i];
-    if (pet.registeredCount() < it.need) { sfxPlay(SFX_DENY); shopSay("collect more Pokemon first"); return; }
-    if (pet.isEgg() || pet.ceremony) { sfxPlay(SFX_DENY); shopSay("needs a creature"); return; }
-    if (pet.coins < it.cost) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
-    if (!pet.giveGift((uint8_t)i)) { sfxPlay(SFX_DENY); shopSay("nothing to do right now"); return; }
-    pet.spendCoins(it.cost);
-    sfxPlay(i == 0 ? SFX_EAT : SFX_HEART);
+  const bool inPanel = x >= SHOP_X && x <= SHOP_X + SHOP_W &&
+                       y >= SHOP_Y && y <= SHOP_Y + SHOP_H;
+  if (!inPanel) { shopOpen = false; return; }
+  if (y >= SHOP_TAB_Y && y <= SHOP_TAB_Y + SHOP_TAB_H) {
+    for (uint8_t i = 0; i < 2; i++) {
+      const int tx = SHOP_TAB_X(i);
+      if (x >= tx && x <= tx + SHOP_TAB_W) {
+        shopTab = i;
+        shopMsg[0] = 0;
+        sfxPlay(SFX_TAP);
+        return;
+      }
+    }
+  }
+  if (shopTab == 0) {
+    for (int i = 0; i < SHOP_COUNT; i++) {
+      const int ry = SHOP_ROW_Y(i);
+      if (x < SHOP_X + 16 || x > SHOP_X + SHOP_W - 16 ||
+          y < ry || y > ry + SHOP_ROW_H) continue;
+      const ShopItem &it = SHOP_ITEMS[i];
+      if (pet.registeredCount() < it.need) { sfxPlay(SFX_DENY); shopSay("collect more Pokemon"); return; }
+      if (pet.isEgg() || pet.ceremony) { sfxPlay(SFX_DENY); shopSay("needs a creature"); return; }
+      if (pet.coins < it.cost) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
+      if (!pet.giveGift((uint8_t)i)) { sfxPlay(SFX_DENY); shopSay("nothing to do right now"); return; }
+      pet.spendCoins(it.cost);
+      sfxPlay(i == 0 ? SFX_EAT : SFX_HEART);
+      shopSay("thank you!");
+      return;
+    }
+    return;
+  }
+  for (uint8_t i = 0; i < BI_COUNT; i++) {
+    const int ry = SHOP_BATTLE_ROW_Y(i);
+    if (x < SHOP_X + 16 || x > SHOP_X + SHOP_W - 16 ||
+        y < ry || y > ry + SHOP_BATTLE_ROW_H) continue;
+    if (pet.registeredCount() < BTL_ITEM_UNLOCK[i]) {
+      char msg[28];
+      snprintf(msg, sizeof(msg), T(S_SHOP_UNLOCK_FMT), (unsigned)BTL_ITEM_UNLOCK[i]);
+      sfxPlay(SFX_DENY);
+      shopSay(msg);
+      return;
+    }
+    if (pet.battleItems[i] >= 99) { sfxPlay(SFX_DENY); shopSay(T(S_SHOP_FULL)); return; }
+    if (pet.coins < BTL_ITEM_COST[i]) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
+    if (!pet.buyBattleItem(i, BTL_ITEM_COST[i])) { sfxPlay(SFX_DENY); return; }
+    sfxPlay(SFX_HEART);
     shopSay("thank you!");
     return;
   }

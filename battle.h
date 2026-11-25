@@ -69,6 +69,12 @@ void battleAct(Combatant &atk, Combatant &def, uint8_t mv, TurnLog &log);
 // Burn and poison chip damage, applied to one creature after both have acted.
 void battleEndTurn(Combatant &c, TurnLog &log);
 
+// Battle bag actions are deterministic and reject items that would do nothing.
+bool battleApplyItem(Combatant &target, uint8_t item);
+
+// Select an art-backed species from a playable region, or -1 if none is ready.
+int16_t battleWildSpecies(uint8_t region, uint16_t pick);
+
 // Picks the attacker's move. `smart` is what separates hard mode from easy:
 // easy picks uniformly at random, hard reads the type chart, accuracy, whether
 // a move kills this turn, and whether a status or a stat boost is worth the

@@ -17,7 +17,8 @@ This checklist covers the current kids-version candidate. The owner previously r
 
 ## Steps and coins
 - [ ] Walk about 100 steps carrying it: coins and the step count go up.
-- [ ] Shop: buy something, coins drop, item works.
+- [ ] Shop: buy a care item and a battle item; the correct coin amount is removed.
+- [ ] Battle item inventory stays correct after leaving and reopening the shop.
 - [ ] A gym win pays coins.
 - [ ] Fishing, Treasure and Penalty pay coins (penalty: 5 kicks, 2 coins a goal); after 60 coins in a day they say "daily limit".
 
@@ -26,8 +27,11 @@ This checklist covers the current kids-version candidate. The owner previously r
 - [ ] A finished game pays coins.
 
 ## Battles
-- [ ] Main battle menu has the requested FIGHT, ITEM, POKÉMON, and RUN choices. ITEM is not implemented in the current build.
-- [ ] ITEM opens the bag, an owned item can be used, its effect is correct, and turn order is correct. (After item support is implemented.)
+- [ ] Main battle menu shows FIGHT, ITEM, POKÉMON and RUN.
+- [ ] ITEM opens the bag. POTION adds up to 20 HP, SUPER POTION adds up to 50 HP, and FULL HEAL clears status/confusion.
+- [ ] A successful item use spends the turn; an empty or ineffective item does not.
+- [ ] Battle item counts and coins remain correct after leaving the battle and rebooting.
+- [ ] WILD starts a regional encounter from the gym screen and returns to the same region when the fight ends.
 - [ ] Swiping during a battle does nothing; RUN asks "Run away?".
 - [ ] Every battle control is easy to tap and stays inside the round display.
 - [ ] Battle music plays.
@@ -38,7 +42,8 @@ This checklist covers the current kids-version candidate. The owner previously r
 
 ## Still on hold
 - Overnight USB-only test (unplug at night, check the pet is OK in the morning).
-- Battery, charging, 3D printing: need your approval first.
+- Battery and charging behavior on the board.
+- Print and physically fit the enclosure; verify cable exit, bend radius, button reach, speaker path and service access.
 
 ## Already checked on the PC emulator (no board needed)
 Taps through every menu button, both side buttons, the bottom swipe, fishing, treasure, penalty, the shop and chess; each screen draws and refreshes. Coin payouts and the daily limit. Run it with `tools/emu/tests/run.sh walk`. The board-only items above (sound, steps, touch feel, SD backup, timing) cannot be checked this way.

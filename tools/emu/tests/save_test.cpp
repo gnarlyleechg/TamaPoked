@@ -38,6 +38,9 @@ int main(){
   pet.badges = 0x00BF; pet.badgesHard = 0x000A;
   pet.streak = 12; pet.bestStreak = 19; pet.totalMedals = 41;
   pet.gameHi = 33; pet.strHi = 21; pet.spdHi = 9;
+  pet.battleItems[BI_POTION] = 4;
+  pet.battleItems[BI_SUPER_POTION] = 2;
+  pet.battleItems[BI_FULL_HEAL] = 1;
   pet.bond = 77; pet.careMistakes = 2; pet.weight = 55;
   pet.dexReg[0] = 0x5A; pet.dexReg[9] = 0xC3; pet.dexShinyReg[3] = 0x11;
   for (int i=0;i<PARTY_SLOTS;i++){ PartyMon m; m.dex=20+i*7; m.level=40+i;
@@ -113,6 +116,8 @@ int main(){
   ck(p2.badges==0x00BF && p2.badgesHard==0x000A, "both badge ladders");
   ck(p2.streak==12 && p2.bestStreak==19 && p2.totalMedals==41, "streak and medals");
   ck(p2.gameHi==33 && p2.strHi==21 && p2.spdHi==9, "every minigame record");
+  ck(p2.battleItems[BI_POTION] == 4 && p2.battleItems[BI_SUPER_POTION] == 2 &&
+     p2.battleItems[BI_FULL_HEAL] == 1, "battle item inventory survives export and restore");
   ck(p2.bond==77 && p2.careMistakes==2 && p2.weight==55, "bond, mistakes, weight");
   // A superset, not an equality: begin() re-registers the LIVE species on every
   // load (pet.cpp:1011, seeding the dex for saves older than it existed), so
@@ -150,6 +155,13 @@ int main(){
     ck(!strcmp(p4.trainerName,"DYLAN") && p4.badges==0x00BF,
        "overwrites it rather than merging with it");
   }
+
+  // A save written before the battle bag existed has no bitems key. Loading it
+  // must start with an empty bag, not stale RAM left by a previous save.
+  nvs().erase("bitems");
+  Pet legacy; legacy.battleItems[BI_POTION] = 9; legacy.begin();
+  ck(legacy.battleItems[BI_POTION] == 0 && legacy.battleItems[BI_SUPER_POTION] == 0 &&
+     legacy.battleItems[BI_FULL_HEAL] == 0, "legacy saves without battle items load an empty bag");
 
   printf("%s\n", bad?"FAILURES":"all good");
   return bad?1:0;

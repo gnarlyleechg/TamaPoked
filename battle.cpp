@@ -241,6 +241,48 @@ void battleEndTurn(Combatant &c, TurnLog &log) {
   }
 }
 
+bool battleApplyItem(Combatant &target, uint8_t item) {
+  if (target.fainted()) return false;
+  switch (item) {
+    case BI_POTION:
+      if (target.hp >= target.maxHp) return false;
+      heal(target, 20);
+      return true;
+    case BI_SUPER_POTION:
+      if (target.hp >= target.maxHp) return false;
+      heal(target, 50);
+      return true;
+    case BI_FULL_HEAL:
+      if (target.ailment == AIL_NONE && !target.ailTurns && !target.confuseTurns) return false;
+      target.ailment = AIL_NONE;
+      target.ailTurns = 0;
+      target.confuseTurns = 0;
+      return true;
+    default:
+      return false;
+  }
+}
+
+int16_t battleWildSpecies(uint8_t region, uint16_t pick) {
+  if (region >= REGION_COUNT) return -1;
+  if (region != REGION_ALL && !regionAvailable(region)) return -1;
+  uint16_t count = 0;
+  for (int16_t d = 1; d <= DEX_COUNT; d++) {
+    uint8_t owner = regionOfDex(d);
+    if (owner >= REGION_COUNT || owner == REGION_ALL) continue;
+    if ((region == REGION_ALL && regionAvailable(owner)) || owner == region) count++;
+  }
+  if (!count) return -1;
+  uint16_t slot = pick % count;
+  for (int16_t d = 1; d <= DEX_COUNT; d++) {
+    uint8_t owner = regionOfDex(d);
+    if (owner >= REGION_COUNT || owner == REGION_ALL) continue;
+    if (!((region == REGION_ALL && regionAvailable(owner)) || owner == region)) continue;
+    if (!slot--) return d;
+  }
+  return -1;
+}
+
 // ---------- move choice ----------
 
 uint8_t aiChooseMove(const Combatant &self, const Combatant &foe, bool smart) {

@@ -178,6 +178,44 @@ int main() {
            fights, (double)total / fights, shortest, longest);
   }
 
+  // --- persistent battle-item effects and safe failure cases
+  Combatant bag;
+  mk(bag, 6, 30);
+  bag.hp = bag.maxHp - 10;
+  ck(battleApplyItem(bag, BI_POTION) && bag.hp == bag.maxHp,
+     "Potion heals 20 HP and caps at max HP");
+  ck(!battleApplyItem(bag, BI_POTION), "a full-HP Potion has no effect");
+  bag.hp = bag.maxHp - 35;
+  ck(battleApplyItem(bag, BI_SUPER_POTION) && bag.hp == bag.maxHp,
+     "Super Potion heals 50 HP and caps at max HP");
+  bag.ailment = AIL_POISON; bag.ailTurns = 4; bag.confuseTurns = 2;
+  ck(battleApplyItem(bag, BI_FULL_HEAL) && bag.ailment == AIL_NONE &&
+     bag.ailTurns == 0 && bag.confuseTurns == 0,
+     "Full Heal removes status and confusion");
+  ck(!battleApplyItem(bag, BI_FULL_HEAL), "Full Heal does not waste itself on a clean target");
+  bag.hp = 0;
+  ck(!battleApplyItem(bag, BI_POTION), "a Potion cannot revive a fainted creature");
+  ck(!battleApplyItem(bag, BI_COUNT), "an invalid item ID is rejected");
+
+  // --- wild selection stays inside installed region packs
+  uint16_t artWas = gRegionArt;
+  gRegionArt = 1u << 0; // Kanto only
+  int16_t firstWild = battleWildSpecies(0, 0);
+  int16_t wrappedWild = battleWildSpecies(0, 65535);
+  ck(firstWild >= 1 && firstWild <= DEX_COUNT && regionOfDex(firstWild) == 0,
+     "wild picker returns a species from the selected Kanto pack");
+  ck(wrappedWild >= 1 && wrappedWild <= DEX_COUNT && regionOfDex(wrappedWild) == 0,
+     "wild picker bounds a large random selection");
+  ck(battleWildSpecies(1, 0) == -1,
+     "wild picker rejects a region whose art pack is missing");
+  int16_t mixedWild = battleWildSpecies(REGION_ALL, 65535);
+  ck(mixedWild >= 1 && mixedWild <= DEX_COUNT && regionOfDex(mixedWild) == 0,
+     "mixed wild pool uses only installed packs");
+  gRegionArt = 0;
+  ck(battleWildSpecies(REGION_ALL, 0) == -1,
+     "wild picker rejects an empty art pool");
+  gRegionArt = artWas;
+
   printf("%s\n", bad ? "FAILURES" : "all good");
   return bad ? 1 : 0;
 }
