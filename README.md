@@ -225,7 +225,7 @@ brings ELECTIVIRE, MAGMORTAR and RHYPERIOR waiting on exactly the same thing.
   rather than jumping straight into the party, and **TO PARTY** does that.
 - With a full party you're taken straight to the party screen to pick who the
   newcomer replaces — or to let it go. Nothing is ever overwritten silently.
-- *(Gym battles, which is what the party is for: on the roadmap.)*
+- *Gym battles are implemented; the in-battle item bag remains pending.*
 
 ### The three endings (you choose & witness each — none auto-fire)
 - 💛 **Farewell** — when it's a **final form** that has lived **3 days**. A button
@@ -578,7 +578,7 @@ Seven of the original 151 differ from their Gen 1 typing: Magnemite and Magneton
 (Gen 2), and Clefairy, Clefable, Jigglypuff, Wigglytuff and Mr. Mime gained Fairy
 (Gen 6) — the first two losing Normal entirely.
 
-Typing is shown on the Battle page of the stat card. *(Battles: on the roadmap.)*
+Typing is shown on the Battle page of the stat card. Trainer-gym and LAN battles are implemented; wild encounters and the requested in-battle item bag remain pending.
 
 ## Battle stats and training
 
@@ -695,10 +695,9 @@ To test fast: lower `PET_TICK_MS`, `MINUTES_PER_LEVEL` and `FAREWELL_AGE_MIN` in
 
 ## Roadmap
 
-- **Wild encounters / battle** — designed (see project memory): resolution by
-  ATK/DEF/SPD with PMD Attack/Hurt animations, trainer rank as endgame. Style
-  still to pick (auto / timing / turn-based).
-- **Soak test** 24–48 h (instrumentation ready: `HEALTH` command/heartbeat).
+- **Wild encounters** — pending; trainer-gym and LAN battle systems are already implemented.
+- **In-battle item bag** — pending. The current battle menu has Fight, Pokémon, and Run; adding Item needs save-compatible inventory and battle-use handling.
+- **Board soak test and physical fit** — pending real-device and enclosure validation.
 
 *(Done: 3D-printed case [published on MakerWorld](https://makerworld.com/es/models/2937822-tamapoke-a-pokemon-pokeball-tamagotchi); repo public with the browser installer + one-click sprite bundle.)*
 
