@@ -5,7 +5,8 @@
 - Firmware repository: `gnarlyleechg/TamaPoked`
 - Development branch: `codex/tamapoke-hd-frame-fit`
 - Last firmware source/build commit verified with the pinned board toolchain: `489a3fd9cba2adabb047a208526b3a5961efbbbe`
-- Current branch head: `ed06a771384775604fbfc0700a08fbae397d95ce` (wild encounters and battle items; targeted local checks recorded in `docs/LOCAL_VERIFICATION_2026-11-25.md`; no pinned board build yet)
+- Firmware source head under review: `ed06a771384775604fbfc0700a08fbae397d95ce` (wild encounters and battle items; targeted local checks recorded in `docs/LOCAL_VERIFICATION_2026-11-25.md`; no pinned board build yet)
+- Current PR branch head: `c14781bf80708d8ecd78698a25bb3218a0068939` (documentation-only verification update)
 - Pull request: [#6](https://github.com/gnarlyleechg/TamaPoked/pull/6), open and draft
 - Engineering repository: `gnarlyleechg/AI-Engineering-Workshop`
 - Board: Waveshare ESP32-S3-Touch-AMOLED-1.75, circular 466 × 466 display
