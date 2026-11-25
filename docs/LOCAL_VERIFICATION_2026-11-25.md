@@ -3,7 +3,7 @@
 Date: 2026-11-25 (America/Chicago)  
 Repository: `gnarlyleechg/TamaPoked`  
 Branch: `codex/tamapoke-hd-frame-fit`  
-Verified PR head: `af929dcb61abeff511a2e3fd98c8b79657688058`
+Verified code/test head: `af929dcb61abeff511a2e3fd98c8b79657688058`
 
 ## Results
 
