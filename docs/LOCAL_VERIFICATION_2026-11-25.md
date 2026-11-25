@@ -14,6 +14,7 @@ Verified code/test head: `af929dcb61abeff511a2e3fd98c8b79657688058`
 | Battle animation regression | PASS | Updated the test to dismiss the battle narration panel before selecting FIGHT and TACKLE; verifies both attacks and turn-ordered lunge/hit timing |
 | Sprite pack validation | PASS | Restored local fixtures from the existing seven `web/sprites-*.pak` bundles; 790 sprites load, 19 are legitimately absent, and 528 species above dex 255 were compared against wrap-around twins |
 | Purchase and save regression | PASS | Shop purchase and item inventory survive save reload; item use persists consumption and spends a turn |
+| Wild run confirmation | PASS | The real tap handler keeps the fight open on NO and returns to the same Kanto region on YES |
 
 The firmware compile reported 1,859,979 bytes of flash (59% of the 3,145,728-byte application partition) and 67,036 bytes of static RAM (20% of 327,680 bytes). Existing warnings remain for format specifiers, missing initializers and deprecated SensorLib headers; there were no compile errors.
 
@@ -47,6 +48,10 @@ arduino-cli compile --warnings=all \
 ```
 
 The working copy used a case-matched `TamaPoke/` sketch staging directory because Arduino CLI requires the sketch directory and `.ino` basename to match.
+
+## Follow-up touch-flow check
+
+After the full 46-suite run, the touch test was extended to exercise the wild-battle RUN confirmation through the real tap handler. Choosing NO keeps the battle open and preserves the Kanto gym context; choosing YES closes the wild battle and returns to that same region. The targeted touch test passed with both paths. The firmware source did not change, so this adds focused coverage without repeating the full suite.
 
 ## Still open
 
