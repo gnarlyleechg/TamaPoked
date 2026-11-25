@@ -1,5 +1,34 @@
 # Private playable-release preflight
 
+## November 24 consolidated local verification
+
+The earlier November 24 notes below describe the state before a complete local
+workspace and pinned toolchain were available. For firmware source commit
+`489a3fd9cba2adabb047a208526b3a5961efbbbe`, the current Work session restored
+the existing scene/sprite assets and completed the missing local checks:
+
+- 46 emulator regression suites passed; the 9 app-only package guard tests
+  passed.
+- The actual 94-plate scene archive passed its C++17 loader regression with
+  185 distinct day/night outputs.
+- Real emulator screenshots were captured for all 91 trainer slots by day
+  and night, the three training games, Pokédex, battle, and living-room modes.
+  The review contact sheets were visually inspected.
+- The pinned ESP32-S3/OPI PSRAM/16 MB build passed: app 1,856,304 bytes,
+  compiler-reported static RAM 67,028 bytes. `esptool image-info` validated the
+  ESP32-S3 image checksum and validation hash.
+- Candidate partition-table bytes match the prior 3.24 private installer.
+  Installer range validation confirms the staged write ranges do not overlap
+  NVS or FFat, provided the erase option remains unchecked.
+
+See `docs/CONSOLIDATED_LOCAL_REVIEW_2026-11-24.md` and root
+`WORK_TO_CHAT_HANDOFF.md` for capture/package locations and remaining gates.
+These results do not establish device touch response, refresh rate, live PSRAM
+pressure, battery use, SD load time, or the board's active app slot/security
+configuration. The private installer remains review-only. Do not flash or
+publish it without owner approval. No hardware operation, GitHub Actions run,
+merge, or public release was performed.
+
 ## November 24 checkpoint
 
 Parent artwork checkpoint: db15910a0be6c4df1dafa7fe632055189d1bba89.
