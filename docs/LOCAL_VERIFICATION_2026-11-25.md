@@ -15,7 +15,7 @@ stubs. This avoided starting a GitHub Actions run. The compiler was Debian
 |---|---|---|
 | `battle_test.cpp` | PASS | Item healing and cure effects, no-effect/fainted/invalid cases, region pack filtering and wild-species bounds, plus existing combat regressions |
 | `save_test.cpp` | PASS | Battle item counts survive save export/restore; old saves without the `bitems` key load an empty inventory |
-| `touch_test.cpp` | PASS | Shop tab routing, item menu hit targets, item consumption and turn cost, empty/ineffective item behavior, wild encounter entry from Kanto gym screen |
+| `touch_test.cpp` | PASS | Shop purchase price and inventory update, save reload persistence, item menu hit targets, item consumption and turn cost, empty/ineffective item behavior, wild encounter entry from Kanto gym screen |
 | `i18n_test.cpp` | PASS — 6 languages × 194 strings | Positional string-table completeness and ASCII-only firmware text |
 
 The battle, save and touch executables each ended with `all good` or their final
