@@ -39,6 +39,7 @@ enum : uint8_t { SLEEP_NONE = 0, SLEEP_AUTO, SLEEP_PLAYER };
 enum : uint8_t { CER_NONE = 0, CER_FAREWELL, CER_RUNAWAY, CER_RELEASE };
 
 enum PetMood : uint8_t { MOOD_HAPPY, MOOD_SAD, MOOD_EATING, MOOD_SLEEPING };
+enum BattleItemId : uint8_t { BI_POTION = 0, BI_SUPER_POTION, BI_FULL_HEAL, BI_COUNT };
 
 // medallas del individuo (bitmask)
 enum : uint16_t {
@@ -124,6 +125,7 @@ public:
   // Kids build: coins and steps. Player-wide like the streak, so no ending
   // clears them. Walking with the board earns coins; the shop spends them.
   uint32_t coins = 0;
+  uint8_t battleItems[BI_COUNT] = { 0, 0, 0 }; // player-wide, persistent battle bag
   uint16_t stepsToday = 0;
   uint32_t stepsDay = 0;      // the day number stepsToday belongs to
   uint16_t stepRem = 0;       // steps toward the next coin
@@ -133,6 +135,8 @@ public:
   void addSteps(uint16_t n, uint32_t day);
   void earnCoins(uint32_t n);
   bool spendCoins(uint32_t n);
+  bool buyBattleItem(uint8_t item, uint16_t cost);
+  bool consumeBattleItem(uint8_t item);
   bool giveGift(uint8_t kind);  // shop gifts; false if it could not apply
   // vinculo (del bicho: sube lento con cuidado, se resetea al nacer otro)
   uint8_t bond = 0;

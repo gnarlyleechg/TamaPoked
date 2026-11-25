@@ -49,6 +49,24 @@ data in `home_backs.h`; the Pokémon sprites and game data are unchanged.
 > package the sprites from the original sources with `tools/pack_*.py` (or the web
 > installer).
 
+## Fishing background
+
+`tools/activity_art/prien-lake.png` is an original generated landscape for
+TamaPoke. It depicts a fictional fishing dock inspired by Prien Lake Park and
+the I-210 bridge in Lake Charles, Louisiana. The
+[Calcasieu Parish park description](https://www.calcasieu.gov/Home/Components/FacilityDirectory/FacilityDirectory/32/1466)
+provided geographic reference. No third-party photo or character artwork was
+used to make the background. Run `python tools/pack_fishing_art.py` to regenerate
+its RGB565 palette and indices.
+
+## Woodland arena and treasure cavern
+
+`tools/activity_art/woodland-arena.png` and
+`tools/activity_art/treasure-cavern.png` are original generated environments
+for TamaPoke. They contain no third-party character art. Run
+`python tools/pack_scene_art.py` to regenerate the indexed RGB565 data in
+`scene_backs.h`.
+
 ## Software / hardware
 
 | Component | Author / source |

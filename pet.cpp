@@ -51,6 +51,7 @@ void Pet::begin() {
   memset(dexReg, 0, sizeof(dexReg));
   memset(dexShinyReg, 0, sizeof(dexShinyReg));
   for (int i = 0; i < REGION_COUNT; i++) eggByRegion[i] = 0;
+  memset(battleItems, 0, sizeof(battleItems));
   if (!prefs.getBool("init", false)) {
     prefs.putBool("init", true);
     newEgg();
@@ -328,6 +329,21 @@ void Pet::earnCoins(uint32_t n) {
 bool Pet::spendCoins(uint32_t n) {
   if (coins < n) return false;
   coins -= n;
+  save();
+  return true;
+}
+
+bool Pet::buyBattleItem(uint8_t item, uint16_t cost) {
+  if (item >= BI_COUNT || battleItems[item] >= 99 || coins < cost) return false;
+  coins -= cost;
+  battleItems[item]++;
+  save();
+  return true;
+}
+
+bool Pet::consumeBattleItem(uint8_t item) {
+  if (item >= BI_COUNT || !battleItems[item]) return false;
+  battleItems[item]--;
   save();
   return true;
 }
@@ -1360,6 +1376,7 @@ void Pet::save() {
   prefs.putUShort("stprm", stepRem);
   prefs.putUShort("actd", actToday);
   prefs.putUInt("actday", actDay);
+  prefs.putBytes("bitems", battleItems, sizeof(battleItems));
   prefs.putUChar("bond", bond);
   prefs.putUShort("medal", medals);
   prefs.putUShort("tmedal", totalMedals);
@@ -1432,6 +1449,9 @@ void Pet::load() {
   stepRem = prefs.getUShort("stprm", 0);
   actToday = prefs.getUShort("actd", 0);
   actDay = prefs.getUInt("actday", 0);
+  memset(battleItems, 0, sizeof(battleItems)); // old saves have no inventory key
+  loadBlob(prefs, "bitems", battleItems, sizeof(battleItems));
+  for (uint8_t i = 0; i < BI_COUNT; i++) if (battleItems[i] > 99) battleItems[i] = 99;
   bond = prefs.getUChar("bond", 0);
   medals = prefs.getUShort("medal", 0);
   totalMedals = prefs.getUShort("tmedal", 0);

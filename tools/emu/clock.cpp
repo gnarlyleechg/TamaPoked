@@ -9,10 +9,17 @@ extern bool wasPressed;             // sketch: a gesture is being tracked
 
 static std::chrono::steady_clock::time_point g_tLast = std::chrono::steady_clock::now();
 static uint64_t g_virtUs = 0;      // accumulated in us so the scaling cannot drift
+static bool g_captureClock = false;
+static uint32_t g_captureMillis = 0;
 static uint32_t g_timeScale = 1;   // >1 makes in-game minutes pass faster
 
 void emuSetTimeScale(uint32_t s) { g_timeScale = s ? s : 1; }
 uint32_t emuTimeScale() { return g_timeScale; }
+
+void emuSetCaptureTime(uint32_t now) {
+  g_captureClock = true;
+  g_captureMillis = now;
+}
 
 // The sketch times gestures off this same clock -- a tap needs dt < 1500 and a
 // swipe dt < 800 -- so scaling it wholesale shrinks the window you have to
@@ -22,6 +29,7 @@ uint32_t emuTimeScale() { return g_timeScale; }
 // moment you are. Accumulating (rather than scaling total elapsed time) keeps
 // it monotonic across a change of rate.
 uint32_t millis() {
+  if (g_captureClock) return g_captureMillis;
   auto now = std::chrono::steady_clock::now();
   uint64_t dus = std::chrono::duration_cast<std::chrono::microseconds>(now - g_tLast).count();
   g_tLast = now;

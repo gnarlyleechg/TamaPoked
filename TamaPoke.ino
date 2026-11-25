@@ -22,9 +22,14 @@
 #include "trainers.h"
 #include "link.h"
 #include "linknow.h"
-#include "backs.h"
 #include "home_backs.h"
+#include "fishing_back.h"
+#include "scene_backs.h"
+#include "training_scenes.h"
+#include "textured_scenes.h"
+#include "painted_scenes.h"
 #include "sprite_runs.h"
+#include "sprite_fit.h"
 #include "badges.h"
 #include "avatars.h"
 #include <stdarg.h>
@@ -42,7 +47,7 @@
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
-#define FW_VERSION "3.23"
+#define FW_VERSION "3.24"
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
   LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
@@ -67,6 +72,8 @@ struct {
   uint8_t act = PMD_IDLE;
   uint32_t t0 = 0;      // inicio de la animacion en curso
   uint32_t until = 0;   // fin del estado actual
+  uint32_t lastWalkFrame = 0, walkElapsed = 0, moodSince = 0;
+  PetMood mood = MOOD_HAPPY;
   float x = 233, targetX = 233;
 } beh;
 #define PET_GROUND 304  // linea de suelo de la mascota
@@ -178,6 +185,7 @@ void chessTap(int16_t x, int16_t y);
 void chessAiStep(uint32_t now);
 void renderShop();
 void shopTap(int16_t x, int16_t y);
+bool startWildBattle();
 void openClock();            // defined further down; loop() opens it from the BOOT button
 int clockH = 12, clockM = 0;  // hora en edicion
 
@@ -235,6 +243,7 @@ uint32_t chessAiAt = 0, chessQuitUntil = 0;
 uint8_t chessEarned = 0;
 ChessResult chessRes = CHR_PLAYING;
 bool shopOpen = false;        // the coin shop (menu row)
+uint8_t shopTab = 0;          // 0 care, 1 battle items
 char shopMsg[28] = "";
 uint32_t shopMsgUntil = 0;
 
@@ -450,6 +459,7 @@ static_assert(PDET_R_X > PDET_L_X + PDET_L_W + 8,
               "the destructive button needs a real dead gap before it");
 
 uint8_t gymRegion = 0;
+uint32_t gymWildMsgUntil = 0;
 uint8_t btlRegion = 0;
 #define TRAINERS (TRAINER_SETS[gymRegion % GYM_REGIONS].list)
 #define BTL_TRAINERS (TRAINER_SETS[btlRegion % GYM_REGIONS].list)
@@ -499,6 +509,11 @@ uint8_t playerPage = 0;
 uint8_t gymPage = 0;
 #define GYM_ROWS 5
 #define GYM_ROW_Y(i) (110 + (i) * 50)
+#define GYM_ACTION_Y 372
+#define GYM_ACTION_H UI_TAP_MIN
+#define GYM_ACTION_W 136
+#define GYM_WILD_X 93
+#define GYM_LAN_X 237
 int8_t btlTrainer = -1;      // index into TRAINERS, -1 = a one-off fight
 bool btlHard = false;
 Combatant btlSquad[TRAINER_TEAM_MAX + 1];
@@ -527,9 +542,15 @@ uint32_t btlEnterUntil[2] = { 0, 0 };
 int8_t btlSwapWho = -1;        // 0 = your side, 1 = the foe's, -1 = nothing due
 #define BTL_FAINT_MS 700
 #define BTL_ENTER_MS 420
-// battle menu: 0 = FIGHT/POKEMON, 1 = the moves, 2 = the switch list
+// battle menu: 0 = actions, 1 = moves, 2 = switch list, 3 = run confirm, 4 = items
 uint8_t btlMenu = 0;
-#define BTL_LUNGE_MS 260
+static const StrId BTL_ITEM_NAME[BI_COUNT] = {
+  S_ITEM_POTION, S_ITEM_SUPER_POTION, S_ITEM_FULL_HEAL
+};
+static const StrId BTL_ITEM_DESC[BI_COUNT] = {
+  S_ITEM_POTION_DESC, S_ITEM_SUPER_POTION_DESC, S_ITEM_FULL_HEAL_DESC
+};
+#define BTL_LUNGE_MS 500
 #define BTL_HIT_MS 420
 char btlMsg[6][40];
 uint8_t btlMsgCount = 0;   // queued lines; a tap shows the next
@@ -787,9 +808,7 @@ void ensureMon() {
   monShinyFor = pet.shiny;
   mon.unload();
   pmd.unload();
-  beh.x = beh.targetX = 233;
-  beh.mode = 0;
-  beh.until = 0;
+  beh = {};
   if (pet.speciesId >= 1 && pet.speciesId <= DEX_COUNT) {
     pmd.load(pet.speciesId, pet.shiny);          // principal: PMD
     if (!pmd.loaded) mon.load(pet.speciesId, pet.shiny);  // respaldo: B/N
@@ -1883,12 +1902,19 @@ void onTap(int16_t x, int16_t y) {
       sfxPlay(SFX_TAP);
       return;
     }
-    if (y >= 380 && y <= 412 && x >= 148 && x <= 318) {   // LAN battle
-      gymOpen = false;
-      lan.state = LINK_OFF;
-      lanOpen = true;
-      sfxPlay(SFX_TAP);
-      return;
+    if (y >= GYM_ACTION_Y && y <= GYM_ACTION_Y + GYM_ACTION_H) {
+      if (x >= GYM_WILD_X && x <= GYM_WILD_X + GYM_ACTION_W) {
+        if (startWildBattle()) sfxPlay(SFX_TAP);
+        else { gymWildMsgUntil = millis() + 1800; sfxPlay(SFX_DENY); }
+        return;
+      }
+      if (x >= GYM_LAN_X && x <= GYM_LAN_X + GYM_ACTION_W) {
+        gymOpen = false;
+        lan.state = LINK_OFF;
+        lanOpen = true;
+        sfxPlay(SFX_TAP);
+        return;
+      }
     }
     for (int i = 0; i < GYM_ROWS; i++) {
       uint8_t idx = gymPage * GYM_ROWS + i;
@@ -1962,7 +1988,7 @@ void onTap(int16_t x, int16_t y) {
           if (!pet.ceremony && !confirmUntil) { gymOpen = true; gymPick = true; gymPage = 0; rpickPage = 0; }
           break;
         case 3: if (!pet.ceremony && !confirmUntil) partyOpen = true; break;
-        case 4: shopOpen = true; shopMsg[0] = 0; break;
+        case 4: shopOpen = true; shopTab = 0; shopMsg[0] = 0; break;
         case 5: chessOpen = true; chessState = 0; chessSel = -1; chessAiDue = false; break;
         case 6: actOpen = true; actState = 0; actMsg[0] = 0; break;
         case 7: openClock(); break;
@@ -2768,13 +2794,45 @@ void sackTap() {
   sackShake = 16;  // sacude el saco
 }
 
+// One optional PSRAM cache for every training and gym scene. Allocate once;
+// on allocation failure retain the existing low-memory drawing path.
+static scene_texture::Cache scenicCache;
+static painted_scene::Selection paintedSelection;
+#ifdef SPRITE_DIR
+static const char *scenicDirectory = SPRITE_DIR "/../scenes";
+#else
+static const char *scenicDirectory = "/sdcard/scenes";
+#endif
+static bool scenicCacheAttempted = false;
+static void prepareScenicCache() {
+  if (!scenicCacheAttempted) {
+    scenicCacheAttempted = true;
+    scenicCache.pixels = (uint16_t *)ps_malloc(scene_texture::CacheBytes);
+  }
+}
+static bool selectPaintedScene(int id, bool night) {
+  if (!sdReady) { paintedSelection.invalidate(); return false; }
+  return paintedSelection.select(scenicCache, scenicDirectory, id, night);
+}
+static void drawTrainingBackdrop(int mode) {
+  prepareScenicCache();
+  if (selectPaintedScene(mode, false)) {
+    scenicCache.blit(gfx, scene_texture::H);
+    // Quiet backing for HUD and results. Keep the moving game area unobstructed.
+    const bool result = mode == scene_art::Strength ? sackOverUntil != 0 :
+                        mode == scene_art::Reaction ? spdOverUntil != 0 : gameOverUntil != 0;
+    if (result) gfx->fillRoundRect(66, 132, 334, 166, 18, UI_BG_DAY);
+    else if (mode == scene_art::Strength) gfx->fillRoundRect(108, 252, 250, 121, 18, UI_BG_DAY);
+    else gfx->fillRoundRect(126, 18, 214, 118, 18, UI_BG_DAY);
+  } else if (scenicCache.training(mode)) scenicCache.blit(gfx, scene_texture::H);
+  else scene_art::training(gfx, scene_art::Training(mode));
+}
 void drawGameScene();  // prototipo (definida mas abajo)
 
 void renderSack() {
   uint32_t now = millis();
-  drawGameScene();  // fondo del habitat
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  drawTrainingBackdrop(scene_art::Strength);
+  const uint16_t ink = UI_INK;
 
   // pantalla de resultado
   if (sackOverUntil) {
@@ -2827,6 +2885,17 @@ void renderSack() {
   gfx->fillRoundRect(sx - 42, top, 84, 22, 18, C565(0x7e, 0x28, 0x28));   // tapa
   gfx->drawRoundRect(sx - 42, top, 84, 150, 26, ink);
   gfx->fillRect(sx - 42, top + 70, 84, 4, C565(0x7e, 0x28, 0x28));        // costura
+  // Shaded leather panels and a Pokeball emblem on the existing hit target.
+  // Keep all decoration inside the moving bag, never change its hitbox.
+  gfx->fillRoundRect(sx - 34, top + 23, 13, 101, 6, C565(213, 100, 91));
+  gfx->fillRoundRect(sx + 24, top + 24, 10, 100, 5, C565(119, 35, 40));
+  gfx->fillRoundRect(sx - 24, top + 112, 48, 5, 2, C565(235, 142, 124));
+  gfx->fillCircle(sx, top + 68, 26, UI_INK);
+  gfx->fillCircle(sx, top + 68, 23, UI_WHITE);
+  gfx->fillRoundRect(sx - 20, top + 47, 40, 21, 9, C565(226, 63, 55));
+  gfx->drawFastHLine(sx - 22, top + 68, 45, UI_INK);
+  gfx->fillCircle(sx, top + 68, 8, UI_INK);
+  gfx->fillCircle(sx, top + 68, 5, UI_WHITE);
 
   // contador de golpes
   char buf[8];
@@ -2851,30 +2920,14 @@ void renderSack() {
 
 // fondo del minijuego: hatibat del bicho (cielo por hora + suelo del bioma)
 void drawGameScene() {
-  int hh = sceneHour();
-  bool night = hh < 6 || hh >= 20;
-  uint16_t top, bot;
-  if (night)       { top = C565(0x0c, 0x12, 0x24); bot = C565(0x1e, 0x26, 0x46); }
-  else if (hh < 8) { top = C565(0xd1, 0x6a, 0x86); bot = C565(0xf3, 0xb8, 0x7c); }
-  else if (hh < 18){ top = C565(0x8f, 0xc8, 0xea); bot = C565(0xdc, 0xee, 0xe6); }
-  else             { top = C565(0xc7, 0x5a, 0x4a); bot = C565(0xf0, 0xae, 0x64); }
-  int hor = 376;
-  for (int y = 0; y < hor; y += 8)
-    gfx->fillRect(0, y, 466, 8, lerp565(top, bot, y, hor));
-  if (night)
-    for (auto &st : STARS) gfx->fillRect(st[0], st[1], 4, 4, UI_WHITE);
-  uint8_t bio = pet.isEgg() ? 0 : DEX_TBL[pet.speciesId].biome;
-  uint16_t soil = BIOME_SOIL[bio < 6 ? bio : 0];
-  if (night) soil = lerp565(soil, C565(0x16, 0x1c, 0x30), 9, 16);
-  gfx->fillRect(0, hor, 466, 466 - hor, soil);
+  drawTrainingBackdrop(scene_art::Ball);
 }
 
 void renderGame() {
   // sin fillScreen(NEGRO): drawGameScene cubre los 466x466 completos. Si el
   // DMA del flush anterior aun lee el buffer, vera contenido valido (no negro
   // a medio pintar), que era el parpadeo a 25 fps.
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  const uint16_t ink = UI_INK;
 
   if (gameOverUntil) {
     drawGameScene();
@@ -3251,7 +3304,8 @@ void drawCelebration() {
     l1 = T(S_GREAT);
     l2 = buf;
   }
-  if (!l1) return;
+  // A new hatch clears the medal ID while a previous banner can still be timed.
+  if (!l1 || !l2) return;
   gfx->fillRoundRect(73, 150, 320, 96, 16, UI_BAR_WARN);
   gfx->drawRoundRect(73, 150, 320, 96, 16, UI_INK);
   gfx->setTextColor(UI_INK);
@@ -3494,36 +3548,46 @@ void renderMovePick() {
 
 // ---------- battle ----------
 
-// Draws a battle backdrop scaled 2x. Emitted as runs of identical indices
-// rather than a write per pixel: this is flat pixel art with long horizontal
-// runs, and 240x112 at 2x would otherwise be 26,880 fillRect calls a frame.
-// The round bezel crops the overhang physically, so nothing is clipped here.
-static void drawBack(const BackScene &b, int y0) {
-  const int SC = 2;
-  int x0 = CX - (b.w * SC) / 2;
-  for (int r = 0; r < b.h; r++) {
-    const uint8_t *row = b.idx + (uint32_t)r * b.w;
-    int c = 0;
-    while (c < b.w) {
-      uint8_t v = row[c];
-      int run = 1;
-      while (c + run < b.w && row[c + run] == v) run++;
-      uint16_t col = b.pal[v];
-      gfx->fillRect(x0 + c * SC, y0 + r * SC, run * SC, SC, col);
-      c += run;
+// Stream indexed scenery from flash in two scanlines. The canvas is the
+// only full-size buffer required for these scenes.
+static void drawIndexedBackdrop(int left, int top, int w, int h,
+                                const uint8_t *pixels, const uint16_t *palette) {
+  const int width = w * 2;
+  uint16_t rows[466 * 2];
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      const uint8_t index = pgm_read_byte(pixels + y * w + x);
+      const uint16_t color = pgm_read_word(palette + index);
+      rows[x * 2] = rows[x * 2 + 1] = color;
     }
+    memcpy(rows + width, rows, width * sizeof(uint16_t));
+    gfx->draw16bitRGBBitmap(left, top + y * 2, rows, width, 2);
   }
 }
 
-// Which scene: the FOE's biome, since a battle happens where it lives, and the
-// same day/night split the main screen already uses.
+// Trainer battles retain their gym location when the opponent changes.
+// Other battles use the opponent habitat and time as before.
 static void drawBattleBack() {
-  int16_t dex = btlFoe.dex;
+  const int key = scene_art::gymKey(btlRegion, btlTrainer, GYM_REGIONS, TRAINER_COUNT);
+  if (key >= 0) {
+    const Trainer &tr = BTL_TRAINERS[btlTrainer];
+    const int hour = sceneHour();
+    const bool night = hour < 6 || hour >= 20;
+    const uint16_t accent = typeColor(tr.type);
+    prepareScenicCache();
+    if (selectPaintedScene(3 + key, night)) scenicCache.blit(gfx, 127);
+    else if (scenicCache.gym(btlRegion, btlTrainer, tr.type, accent, night)) scenicCache.blit(gfx, 127);
+    else scene_art::gym(gfx, btlRegion, btlTrainer, tr.type, accent, night);
+    return;
+  }
+  const int16_t dex = btlFoe.dex;
   if (dex < 1 || dex > DEX_COUNT) { gfx->fillCircle(CX, CY, 231, UI_BG_DAY); return; }
-  uint8_t bi = DEX_TBL[dex].biome;
-  if (bi >= BACK_BIOMES) bi = 0;
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  drawBack(BACKS[bi][night ? 1 : 0], 30);
+  uint8_t biome = DEX_TBL[dex].biome;
+  if (biome >= sizeof(BATTLE_BACKDROPS) / sizeof(BATTLE_BACKDROPS[0])) biome = 0;
+  const int hour = sceneHour();
+  const bool night = hour < 6 || hour >= 20;
+  const BattleBackdrop &back = BATTLE_BACKDROPS[biome];
+  drawIndexedBackdrop(0, 0, ARENA_W, ARENA_H, back.pixels, back.palettes[night]);
 }
 
 // Streams a side's sprite if it is not already the one loaded. Called whenever
@@ -3680,6 +3744,7 @@ void startTrainerBattle(uint8_t idx, bool hard) {
   // size cap on top, plus a smarter AI and better opposing IVs.
   buildSquad(top, hard ? tr.count : TRAINER_TEAM_MAX, squadMask);
   if (!btlSquadN) return;
+  btlRegion = gymRegion;  // snapshot region for the entire fight
   btlTrainer = (int8_t)idx;
   btlHard = hard;
   btlFoeAt = 0;
@@ -3705,6 +3770,13 @@ void startTrainerBattle(uint8_t idx, bool hard) {
 
 void startBattle(int16_t dex, uint8_t lvl) {
   if (pet.isEgg() || pet.ceremony != CER_NONE) return;
+  btlTrainer = -1;
+  btlHard = false;
+  btlRegion = pet.region;
+  btlLink = false;
+  btlLinkHost = false;
+  btlMyAct = 0;
+  btlFoeSquadN = 0;
   if (dex < 1 || dex > DEX_COUNT) return;
   buildSquad(0, TRAINER_TEAM_MAX, 0xFFFF);
   if (!btlSquadN) return;
@@ -3733,6 +3805,20 @@ void startBattle(int16_t dex, uint8_t lvl) {
   btlLungeUntil[0] = btlLungeUntil[1] = 0;
   btlHitUntil[0] = btlHitUntil[1] = 0;
   battleOpen = true;
+}
+
+bool startWildBattle() {
+  if (pet.isEgg() || pet.ceremony != CER_NONE) return false;
+  const int16_t dex = battleWildSpecies(gymRegion, (uint16_t)random(65535));
+  if (dex < 1) return false;
+  int16_t level = (int16_t)pet.level() + (int16_t)random(6) - 3;
+  if (level < 1) level = 1;
+  if (level > 100) level = 100;
+  startBattle(dex, (uint8_t)level);
+  if (!battleOpen) return false;
+  btlRegion = gymRegion;
+  btlSay(T(S_WILD_APPEARED_FMT), btlFoe.name);
+  return true;
 }
 
 // The guest's whole turn: copy in what the host resolved and play the same
@@ -3879,18 +3965,27 @@ static void btlResolve(uint8_t yourMove) {
   uint8_t mb = youFirst ? foeMove : yourMove;
 
   uint16_t hp0You = btlYou.hp, hp0Foe = btlFoe.hp;
-  battleAct(*a, *b, ma, lg);
-  btlNarrate(*a, *b, lg);
-  if (lg.damage && !lg.hurtSelf) btlLungeUntil[a == &btlYou ? 0 : 1] = now + BTL_LUNGE_MS;
-  if (!b->fainted()) {
-    battleAct(*b, *a, mb, lg);
-    btlNarrate(*b, *a, lg);
-    if (lg.damage && !lg.hurtSelf)
-      btlLungeUntil[b == &btlYou ? 0 : 1] = now + BTL_LUNGE_MS + BTL_LUNGE_MS;
+  const int first = youFirst ? 0 : 1;
+  const int second = 1 - first;
+  btlLungeUntil[0] = btlLungeUntil[1] = 0;
+  btlHitUntil[0] = btlHitUntil[1] = 0;
+  const uint16_t hpA = a->hp, hpB = b->hp;
+  if (ma) {
+    battleAct(*a, *b, ma, lg);
+    if (a->hp < hpA) btlHitUntil[first] = now + BTL_HIT_MS;
+    if (b->hp < hpB) btlHitUntil[second] = now + BTL_HIT_MS;
+    btlNarrate(*a, *b, lg);
+    if (lg.damage && !lg.hurtSelf) btlLungeUntil[first] = now + BTL_LUNGE_MS;
   }
-  // whoever actually lost health flinches, whichever side dealt it
-  if (btlYou.hp < hp0You) btlHitUntil[0] = now + BTL_HIT_MS;
-  if (btlFoe.hp < hp0Foe) btlHitUntil[1] = now + BTL_HIT_MS;
+  if (!b->fainted() && mb) {
+    const uint16_t replyHpA = a->hp, replyHpB = b->hp;
+    const uint32_t replyAt = now + BTL_LUNGE_MS;
+    battleAct(*b, *a, mb, lg);
+    if (a->hp < replyHpA) btlHitUntil[first] = replyAt + BTL_HIT_MS;
+    if (b->hp < replyHpB && !btlHitUntil[second]) btlHitUntil[second] = replyAt + BTL_HIT_MS;
+    btlNarrate(*b, *a, lg);
+    if (lg.damage && !lg.hurtSelf) btlLungeUntil[second] = replyAt + BTL_LUNGE_MS;
+  }
   if (btlLink && btlLinkHost) btlShipResult(yourMove, foeMove, hp0You, hp0Foe);
   if (!btlYou.fainted() && !btlFoe.fainted()) {
     battleEndTurn(btlYou, lg);
@@ -3901,18 +3996,22 @@ static void btlResolve(uint8_t yourMove) {
   // Someone went down. The replacement is NOT swapped in here -- that made the
   // change instant and read as a jump cut. Flag it, let the sprite drop out of
   // frame, and swap when the player dismisses the message.
+  const uint32_t firstHitLeft = btlHitUntil[first] - now;
+  const bool faintedOnReply = btlHitUntil[first] &&
+      firstHitLeft > BTL_HIT_MS && firstHitLeft <= BTL_HIT_MS + BTL_LUNGE_MS;
+  const uint32_t firstFaintUntil = now + BTL_FAINT_MS + (faintedOnReply ? BTL_LUNGE_MS : 0);
   if (btlFoe.fainted() && btlLink && btlFoeAt + 1 < btlFoeSquadN) {
-    btlFaintUntil[1] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[1] = first == 1 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 1;
     return;
   }
   if (btlFoe.fainted() && btlTrainer >= 0 && btlFoeAt + 1 < BTL_TRAINERS[btlTrainer].count) {
-    btlFaintUntil[1] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[1] = first == 1 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 1;
     return;
   }
   if (btlYou.fainted() && btlSquadAt + 1 < btlSquadN) {
-    btlFaintUntil[0] = millis() + BTL_FAINT_MS;
+    btlFaintUntil[0] = first == 0 ? firstFaintUntil : now + BTL_FAINT_MS;
     btlSwapWho = 0;
     return;
   }
@@ -3944,7 +4043,7 @@ static void btlResolve(uint8_t yourMove) {
     if (btlLink && btlLinkHost) lan.sendEnd(btlWon);
     if (btlLink) { btlSay("%s", btlWon ? T(S_BTL_WIN) : T(S_BTL_LOSE)); return; }
     if (btlWon && btlTrainer >= 0) { btlWinUntil = millis() + 60000; return; }
-    btlSay("%s", T(S_BTL_LOSE));
+    btlSay("%s", btlWon ? T(S_BTL_WIN) : T(S_BTL_LOSE));
   }
 }
 
@@ -3979,8 +4078,8 @@ static void btlDrawButton(int x, int y, int w, int h, uint16_t color) {
 
 // Keep the arena shadow tied to the base of the actual sprite frame.
 static void btlDrawGroundShadow(int footX, int footY) {
-  gfx->fillRoundRect(footX - 56, footY - 4, 112, 18, 9, C565(0x6e, 0x84, 0x78));
-  gfx->fillRoundRect(footX - 43, footY - 2, 86, 8, 4, C565(0xa9, 0xbd, 0xa8));
+  gfx->fillRoundRect(footX - 44, footY - 3, 88, 10, 5, C565(76, 81, 53));
+  gfx->fillRoundRect(footX - 28, footY - 2, 56, 6, 3, C565(49, 55, 37));
 }
 
 static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t who) {
@@ -4023,7 +4122,7 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   bool flash = false;
   if (now < btlFaintUntil[who]) {          // sinks out of frame as it faints
     uint32_t left = btlFaintUntil[who] - now;
-    oy += (int)((BTL_FAINT_MS - left) * 70 / BTL_FAINT_MS);
+    if (left <= BTL_FAINT_MS) oy += (int)((BTL_FAINT_MS - left) * 70 / BTL_FAINT_MS);
   } else if (c.fainted() && btlSwapWho == (int8_t)who) {
     return;                                // gone, waiting to be replaced
   }
@@ -4031,16 +4130,17 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     uint32_t left = btlEnterUntil[who] - now;
     oy += (int)(left * 70 / BTL_ENTER_MS);
   }
-  if (now < btlLungeUntil[who]) {          // lean in, then back out
-    uint32_t left = btlLungeUntil[who] - now;
+  const uint32_t lungeLeft = btlLungeUntil[who] - now;
+  const uint32_t hitLeft = btlHitUntil[who] - now;
+  const bool lunging = btlLungeUntil[who] && lungeLeft && lungeLeft <= BTL_LUNGE_MS;
+  const bool flinching = btlHitUntil[who] && hitLeft && hitLeft <= BTL_HIT_MS;
+  if (lunging) {
+    uint32_t left = lungeLeft;
     int amt = (int)(left > BTL_LUNGE_MS / 2 ? BTL_LUNGE_MS - left : left) * 22 / (BTL_LUNGE_MS / 2);
     ox = who == 0 ? amt : -amt;            // you lunge right, the foe lunges left
     oy = who == 0 ? -amt / 2 : amt / 2;
   }
-  if (now < btlHitUntil[who]) {
-    uint32_t left = btlHitUntil[who] - now;
-    ox += ((left / 50) % 2) ? 5 : -5;      // jitter
-  }
+  if (flinching && !lunging) ox += ((hitLeft / 50) % 2) ? 5 : -5;
 
   // Real PMD playback when the sprite streamed: attack while lunging, hurt
   // while flinching, idle otherwise. `has()` guards every one, because not
@@ -4052,10 +4152,15 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
     uint8_t act = PMD_IDLE;
     bool loop = true;
     uint32_t t = now;
-    if (now < btlHitUntil[who] && btlPmd[who].has(PMD_HURT)) {
-      act = PMD_HURT; loop = false; t = now - (btlHitUntil[who] - BTL_HIT_MS);
-    } else if (now < btlLungeUntil[who] && btlPmd[who].has(PMD_ATTACK)) {
-      act = PMD_ATTACK; loop = false; t = now - (btlLungeUntil[who] - BTL_LUNGE_MS);
+    if (lunging && btlPmd[who].has(PMD_ATTACK)) {
+      act = PMD_ATTACK;
+      loop = false;
+      // Fit the authored clip into the lunge so its recovery is visible, too.
+      t = (BTL_LUNGE_MS - lungeLeft) * pmdActTotalMs(btlPmd[who].acts[act]) / BTL_LUNGE_MS;
+    } else if (flinching && btlPmd[who].has(PMD_HURT)) {
+      act = PMD_HURT;
+      loop = false;
+      t = BTL_HIT_MS - hitLeft;
     }
     drawPmdActM(btlPmd[who], act, sx + 24 + ox, sy + 78 + oy, t, loop, false, 4);
     return;
@@ -4066,7 +4171,7 @@ static void btlSide(int tx, int ty, int sx, int sy, const Combatant &c, uint8_t 
   // Keep this grounded on the actual frame, rather than assume a 16px sprite.
   const int thumbH = th[1] * 3;
   btlDrawGroundShadow(sx + GAL_CELL / 2, sy + (GAL_CELL - thumbH) / 2 + thumbH);
-  if (now < btlHitUntil[who]) flash = ((btlHitUntil[who] - now) / 60) % 2 == 0;
+  if (flinching && !lunging) flash = (hitLeft / 60) % 2 == 0;
   drawThumb(th, sx + ox, sy + oy, 3, flash);
 }
 
@@ -4178,7 +4283,7 @@ void renderBattle() {
 
   // x=82 not 58: at y=60 the round bezel starts around x=77, and a longer
   // name like BLASTOISE was losing its first characters off the edge
-  btlSide(82, 82, 300, 40, btlFoe, 1);    // foe reads top-left, sprite top-right
+  btlSide(82, 82, 300, 76, btlFoe, 1);    // leave room above the foe for attack effects
   btlSide(250, 190, 76, 168, btlYou, 0);  // you read bottom-right, sprite bottom-left
 
   // Waiting on the other device. Without this the screen is identical to the
@@ -4208,23 +4313,19 @@ void renderBattle() {
     gfx->setCursor(CX - 30, BTL_GRID_Y + 84);
     gfx->print("tap...");
   } else if (btlMenu == 0) {
-    // FIGHT across the top, then POKEMON and RUN side by side. Three full-width
-    // rows do not fit: the panel is round, and at that depth the chord is only
-    // ~250 px. The lower two reuse the move grid's cells, so they inherit its
-    // padded hit areas -- which is what made POKEMON hard to press before.
-    btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_BG_DAY);
-    gfx->setTextColor(UI_INK);
-    gfx->setTextSize(2);
-    gfx->setCursor(CX - (int)strlen(T(S_FIGHT)) * 6, BTL_GRID_Y + 14);
-    gfx->print(T(S_FIGHT));
-    const char *low[2] = { T(S_BTL_SWITCH), T(S_BTL_RUN) };
-    for (int i = 0; i < 2; i++) {
-      int x = BTL_CELL_X(i + 2), y = BTL_CELL_Y(i + 2);
-      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, UI_TRACK);
-      gfx->setTextColor(UI_INK);
+    static const StrId ACTIONS[4] = {
+      S_FIGHT, S_BTL_ITEM, S_BTL_SWITCH, S_BTL_RUN
+    };
+    for (int i = 0; i < 4; i++) {
+      const bool enabled = !(i == 1 && btlLink);
+      const int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H,
+                    enabled ? (i < 2 ? UI_BG_DAY : UI_TRACK) : UI_TRACK);
+      gfx->setTextColor(enabled ? UI_INK : 0x8410);
       gfx->setTextSize(2);
-      gfx->setCursor(x + (BTL_CELL_W - (int)strlen(low[i]) * 12) / 2, y + 14);
-      gfx->print(low[i]);
+      const char *label = T(ACTIONS[i]);
+      gfx->setCursor(x + (BTL_CELL_W - (int)strlen(label) * 12) / 2, y + 14);
+      gfx->print(label);
     }
   } else if (btlMenu == 3) {           // "Run away?" -- YES left, NO under the old RUN spot
     btlDrawButton(BTL_GRID_X, BTL_GRID_Y, 328, BTL_CELL_H, UI_WHITE);
@@ -4240,6 +4341,23 @@ void renderBattle() {
       gfx->setTextSize(2);
       gfx->setCursor(x + (BTL_CELL_W - (int)strlen(yn[i]) * 12) / 2, y + 14);
       gfx->print(yn[i]);
+    }
+  } else if (btlMenu == 4) {
+    drawBtlBack();
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      const int x = BTL_CELL_X(i), y = BTL_CELL_Y(i);
+      const bool owned = pet.battleItems[i] != 0;
+      btlDrawButton(x, y, BTL_CELL_W, BTL_CELL_H, owned ? UI_BG_DAY : UI_TRACK);
+      gfx->setTextColor(owned ? UI_INK : 0x8410);
+      gfx->setTextSize(1);
+      gfx->setCursor(x + 8, y + 8);
+      gfx->print(T(BTL_ITEM_NAME[i]));
+      gfx->setCursor(x + 8, y + 22);
+      gfx->print(T(BTL_ITEM_DESC[i]));
+      char count[8];
+      snprintf(count, sizeof(count), "x%u", (unsigned)pet.battleItems[i]);
+      gfx->setCursor(x + BTL_CELL_W - (int)strlen(count) * 6 - 8, y + 34);
+      gfx->print(count);
     }
   } else if (btlMenu == 2) {
     drawBtlBack();
@@ -4400,14 +4518,45 @@ void battleTap(int16_t x, int16_t y) {
     return;
   }
   if (btlMenu == 0) {
-    if (x >= BTL_GRID_X - BTL_HIT_PAD && x <= BTL_GRID_X + 328 + BTL_HIT_PAD &&
-        y >= BTL_HIT_Y0(0) && y <= BTL_HIT_Y1(0)) {
+    if (btlCellHit(0, x, y)) { sfxPlay(SFX_TAP); btlMenu = 1; return; }
+    if (btlCellHit(1, x, y)) {
+      if (btlLink) { sfxPlay(SFX_DENY); return; }
       sfxPlay(SFX_TAP);
-      btlMenu = 1;                       // FIGHT
+      btlMenu = 4;
       return;
     }
     if (btlCellHit(2, x, y)) { sfxPlay(SFX_TAP); btlMenu = 2; return; }
-    if (btlCellHit(3, x, y)) { sfxPlay(SFX_TAP); btlMenu = 3; return; }   // asks first
+    if (btlCellHit(3, x, y)) { sfxPlay(SFX_TAP); btlMenu = 3; return; }
+    return;
+  }
+  if (btlMenu == 4) {
+    if (btlBackTap(x, y)) return;
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      if (!btlCellHit(i, x, y)) continue;
+      if (!pet.battleItems[i]) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_NO_ITEMS));
+        return;
+      }
+      Combatant healed = btlYou;
+      if (!battleApplyItem(healed, i)) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_ITEM_NO_EFFECT));
+        return;
+      }
+      if (!pet.consumeBattleItem(i)) {
+        sfxPlay(SFX_DENY);
+        btlSay("%s", T(S_BTL_NO_ITEMS));
+        return;
+      }
+      btlYou = healed;
+      btlSquad[btlSquadAt] = btlYou;
+      btlMenu = 0;
+      sfxPlay(SFX_HEART);
+      btlSay(T(S_BTL_USED_ITEM_FMT), btlYou.name, T(BTL_ITEM_NAME[i]));
+      btlResolve(0);                 // the opponent still gets its turn
+      return;
+    }
     return;
   }
   if (btlMenu == 3) {         // only an explicit YES leaves the fight
@@ -4657,9 +4806,8 @@ void spdTap(int16_t x, int16_t y) {
 
 void renderSpeed() {
   uint32_t now = millis();
-  drawGameScene();
-  bool night = sceneHour() < 6 || sceneHour() >= 20;
-  uint16_t ink = night ? UI_INK_NIGHT : UI_INK;
+  drawTrainingBackdrop(scene_art::Reaction);
+  const uint16_t ink = UI_INK;
 
   if (spdOverUntil) {
     if (now > spdOverUntil) { spdOpen = false; return; }
@@ -4712,9 +4860,19 @@ void renderSpeed() {
   int life = spdLife();
   int r = SPD_R - (int)((uint32_t)SPD_R * age / (life ? life : 1) / 2);
   if (r < 8) r = 8;
-  gfx->fillCircle(spdX, spdY, r, UI_BAR_BAD);
-  gfx->fillCircle(spdX, spdY, r * 2 / 3, UI_WHITE);
-  gfx->fillCircle(spdX, spdY, r / 3, UI_BAR_BAD);
+  // Pokeball-style reaction target, with the same animated radius and center.
+  gfx->fillCircle(spdX, spdY, r, UI_INK);
+  const int inner = r - 2;
+  gfx->fillCircle(spdX, spdY, inner, UI_WHITE);
+  // Draw only the upper hemisphere, bounded by the original target circle.
+  for (int dy = -inner; dy < 0; ++dy) {
+    int dx = 0;
+    while ((dx + 1) * (dx + 1) + dy * dy <= inner * inner) ++dx;
+    gfx->drawFastHLine(spdX - dx, spdY + dy, 2 * dx + 1, C565(221, 60, 51));
+  }
+  gfx->drawFastHLine(spdX - inner, spdY, 2 * inner + 1, UI_INK);
+  gfx->fillCircle(spdX, spdY, r / 3, UI_INK);
+  gfx->fillCircle(spdX, spdY, r / 3 - 1, UI_WHITE);
 
   char b[12];
   snprintf(b, sizeof(b), "%u", spdHits);
@@ -5118,16 +5276,24 @@ void renderGyms() {
   uint8_t pages = (TRAINER_COUNT + GYM_ROWS - 1) / GYM_ROWS;
   for (uint8_t i = 0; i < pages; i++) {
     int dx = CX - (pages - 1) * 13 + i * 26;
-    if (i == gymPage) gfx->fillCircle(dx, 366, 5, UI_INK);
-    else gfx->drawCircle(dx, 366, 4, UI_INK);
+    if (i == gymPage) gfx->fillCircle(dx, 362, 5, UI_INK);
+    else gfx->drawCircle(dx, 362, 4, UI_INK);
   }
-  // the other kind of battle lives here too
-  gfx->fillRoundRect(148, 380, 170, 32, 9, UI_BG_DAY);
-  gfx->drawRoundRect(148, 380, 170, 32, 9, UI_INK);
-  gfx->setTextColor(UI_INK);
-  gfx->setTextSize(2);
-  gfx->setCursor(CX - strlen(T(S_LAN)) * 6, 388);
-  gfx->print(T(S_LAN));
+  const int actionX[2] = { GYM_WILD_X, GYM_LAN_X };
+  const StrId actionLabel[2] = { S_WILD, S_LAN };
+  for (uint8_t i = 0; i < 2; i++) {
+    gfx->fillRoundRect(actionX[i], GYM_ACTION_Y, GYM_ACTION_W, GYM_ACTION_H,
+                       10, UI_BG_DAY);
+    gfx->drawRoundRect(actionX[i], GYM_ACTION_Y, GYM_ACTION_W, GYM_ACTION_H,
+                       10, UI_INK);
+    const bool noWild = i == 0 && gymWildMsgUntil && millis() < gymWildMsgUntil;
+    const char *label = noWild ? T(S_WILD_NONE) : T(actionLabel[i]);
+    gfx->setTextColor(noWild ? UI_BAR_BAD : UI_INK);
+    gfx->setTextSize(noWild ? 1 : 2);
+    gfx->setCursor(CX - (int)strlen(label) * (noWild ? 3 : 6) +
+                   (i == 0 ? -70 : 70), GYM_ACTION_Y + (noWild ? 18 : 14));
+    gfx->print(label);
+  }
   gfx->flush();
 }
 
@@ -5561,6 +5727,7 @@ void renderTrain() {
 
   gfx->fillRoundRect(TRAIN_X, TRAIN_Y, TRAIN_W, TRAIN_H, 18, UI_WHITE);
   gfx->drawRoundRect(TRAIN_X, TRAIN_Y, TRAIN_W, TRAIN_H, 18, UI_INK);
+  gfx->drawFastHLine(TRAIN_X + 30, TRAIN_Y + 45, TRAIN_W - 60, UI_TRACK);
 
   gfx->setTextColor(UI_INK);
   gfx->setTextSize(2);
@@ -5670,7 +5837,8 @@ static void chessGlyph(int cx, int cy, int t, uint16_t c, uint16_t det, bool det
   }
 }
 static void chessPiece(int cx, int cy, int t, bool white) {
-  uint16_t fill = white ? 0xFFFF : 0x2104, line = white ? 0x2104 : 0xC618;
+  uint16_t fill = white ? C565(255, 247, 223) : C565(35, 43, 48);
+  uint16_t line = white ? UI_INK : C565(229, 214, 181);
   static const int8_t OFF[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
   for (int i = 0; i < 8; i++) chessGlyph(cx + OFF[i][0], cy + OFF[i][1], t, line, line, false);
   chessGlyph(cx, cy, t, fill, line, true);
@@ -5709,6 +5877,8 @@ void renderChess() {
   ChessMove mv[64];
   int nmv = (!previewing && chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
   bool checked = chessG.inCheck(chessG.whiteToMove);
+  constexpr int side = 8 * CH_SQ;
+  gfx->drawRect(CH_X0 - 2, CH_Y0 - 2, side + 4, side + 4, UI_INK);
   for (int r = 0; r < 8; r++) {
     for (int f = 0; f < 8; f++) {
       int s = r * 8 + f, x = CH_X0 + f * CH_SQ, y = CH_Y0 + (7 - r) * CH_SQ;
@@ -5717,6 +5887,8 @@ void renderChess() {
       if (s == chessSel) col = CH_PICK;
       if (s == chessPendingTo) col = UI_BAR_OK;
       gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
+      gfx->drawFastHLine(x, y, CH_SQ, lerp565(col, UI_WHITE, 1, 5));
+      gfx->drawFastHLine(x, y + CH_SQ - 1, CH_SQ, lerp565(col, UI_INK, 1, 5));
       int8_t p = shown.b[s];
       if (s == chessPendingTo) {
         gfx->drawRect(x, y, CH_SQ, CH_SQ, UI_INK);
@@ -5730,7 +5902,8 @@ void renderChess() {
   }
   for (int i = 0; i < nmv; i++) {     // where the chosen piece can go
     int x = CH_X0 + (mv[i].to % 8) * CH_SQ, y = CH_Y0 + (7 - mv[i].to / 8) * CH_SQ;
-    gfx->fillCircle(x + 20, y + 20, 6, CH_PICK);
+    gfx->drawCircle(x + 20, y + 20, 7, UI_INK);
+    if (!shown.b[mv[i].to]) gfx->fillCircle(x + 20, y + 20, 5, CH_PICK);
   }
   // header and status
   gfx->setTextColor(UI_INK);
@@ -5886,74 +6059,23 @@ static void fishLine(int x0, int y0, int x1, int y1, int sag) {   // a drooping 
     px = x; py = y;
   }
 }
+static void drawFishingRipple(int x, int y, int radius, uint16_t color) {
+  // Flatten the ring to follow the perspective of the lake surface.
+  int height = radius / 4;
+  gfx->drawLine(x - radius, y, x - radius * 2 / 3, y - height, color);
+  gfx->drawFastHLine(x - radius * 2 / 3, y - height, radius * 4 / 3 + 1, color);
+  gfx->drawLine(x + radius * 2 / 3, y - height, x + radius, y, color);
+  gfx->drawLine(x - radius, y, x - radius * 2 / 3, y + height, color);
+  gfx->drawFastHLine(x - radius * 2 / 3, y + height, radius * 4 / 3 + 1, color);
+  gfx->drawLine(x + radius * 2 / 3, y + height, x + radius, y, color);
+}
+
 static void drawFishScene() {
-  const int L = 40, T = 108, W = 386, H = 250;     // the window
+  const int L = 40, T = 108;
   const int WATER_Y = 262;
   uint32_t now = millis();
-  // Original, lightweight park-inspired scenery: distant I-210 bridge,
-  // wooded shoreline and sunset reflected on Prien Lake. This is an artistic
-  // interpretation, not a survey or photo of a specific fishing platform.
-  const uint16_t skyTop = C565(102, 157, 189), skyLow = C565(253, 207, 152);
-  const uint16_t waterFar = C565(108, 153, 160), waterNear = C565(37, 89, 112);
-  gfx->fillRoundRect(L, T, W, H, 14, skyTop);
-  for (int y = T + 14; y < WATER_Y; y += 7) {
-    const int h = WATER_Y - y < 7 ? WATER_Y - y : 7;
-    gfx->fillRect(L + 1, y, W - 2, h, lerp565(skyTop, skyLow, y - T, WATER_Y - T));
-  }
-  gfx->fillCircle(331, 167, 25, C565(250, 224, 169));
-  gfx->fillCircle(331, 167, 18, C565(255, 241, 186));
-  for (int i = 0; i < 6; ++i) {
-    const int x = L + 32 + i * 58;
-    gfx->fillRoundRect(x, T + 36 + (i % 3) * 14, 42 + (i % 2) * 21, 4, 2, C565(220, 221, 211));
-  }
-  const uint16_t distant = C565(84, 114, 115);
-  gfx->fillRect(L + 1, WATER_Y - 12, W - 2, 12, distant);
-  for (int i = 0; i < 22; ++i) {
-    const int x = L + 8 + i * 17;
-    const int r = 8 + (i * 7) % 10;
-    gfx->fillCircle(x, WATER_Y - 13 - (i % 3) * 3, r, distant);
-  }
-  // Stylized high bridge silhouette on the far side of the lake.
-  const uint16_t bridge = C565(70, 88, 91);
-  gfx->drawLine(174, 243, 240, 220, bridge);
-  gfx->fillRect(240, 219, 78, 4, bridge);
-  gfx->drawLine(317, 220, 412, 243, bridge);
-  gfx->drawLine(174, 246, 240, 223, bridge);
-  gfx->drawLine(317, 223, 412, 246, bridge);
-  for (int i = 0; i < 5; ++i) {
-    int x = 192 + 49 * i;
-    int y = x < 240 ? 244 - (x - 174) * 23 / 66 :
-            x < 318 ? 221 : 221 + (x - 318) * 23 / 94;
-    gfx->fillRect(x, y, 3, WATER_Y - y, bridge);
-  }
-  // Foreground shade trees frame the shoreline, away from the hook target.
-  gfx->fillRect(L + 17, T + 46, 7, WATER_Y - T - 46, C565(85, 80, 57));
-  for (int i = 0; i < 7; ++i)
-    gfx->fillCircle(L + 17 + i * 12, T + 45 + (i % 3) * 9, 15, C565(62, 100 + (i % 3) * 10, 73));
-  gfx->fillRoundRect(L, WATER_Y, W, T + H - WATER_Y, 14, waterNear);
-  for (int y = WATER_Y; y < T + H - 14; y += 6) {
-    const int h = T + H - 14 - y < 6 ? T + H - 14 - y : 6;
-    gfx->fillRect(L + 1, y, W - 2, h, lerp565(waterFar, waterNear, y - WATER_Y, H - (WATER_Y - T)));
-  }
-  // Deterministic moving reflections, no game RNG consumed by rendering.
-  for (int i = 0; i < 23; ++i) {
-    const int wy = WATER_Y + 5 + (i * 13) % 75;
-    const int wx = L + 155 + (i * 41 + (int)(now / 150 % 15)) % 190;
-    const int len = 6 + (i * 9) % 22;
-    gfx->drawFastHLine(wx, wy, len, lerp565(waterFar, skyLow, i % 4, 5));
-  }
-  for (int i = 0; i < 9; ++i) {
-    int len = 10 + (i * 13) % 40;
-    gfx->drawFastHLine(331 - len / 2, WATER_Y + 4 + i * 6, len, C565(205, 184, 141));
-  }
-  // Keep the original dock/platform footprint and creature/rod coordinates.
-  gfx->fillRect(L, WATER_Y - 2, 150, 12, C565(153, 122, 87));
-  gfx->fillRect(L, WATER_Y - 2, 150, 2, C565(212, 178, 131));
-  gfx->fillRect(L, WATER_Y + 7, 150, 3, C565(86, 70, 53));
-  for (int i = 0; i < 5; ++i) gfx->drawFastVLine(L + 20 + i * 30, WATER_Y, 7, C565(105, 82, 58));
-  gfx->fillRect(L + 18, WATER_Y + 10, 8, 40, C565(86, 70, 53));
-  gfx->fillRect(L + 120, WATER_Y + 10, 8, 40, C565(86, 70, 53));
-  gfx->drawRoundRect(L, T, W, H, 14, UI_INK);
+  drawIndexedBackdrop(L, T, FISH_ART_W, FISH_ART_H, FISH_ART_PIXELS, FISH_ART_PALETTE);
+  gfx->drawRect(L, T, FISH_ART_W * 2, FISH_ART_H * 2, UI_INK);
 
   int petX = L + 80, ground = WATER_Y - 2;                                    // your creature
   if (pmd.loaded) drawPmdAct(PMD_IDLE, petX, ground, now, true, false, 3);
@@ -5986,11 +6108,15 @@ static void drawFishScene() {
     int dip = (fishPhase == 2) ? 12 : (((now / 450) & 1) ? 1 : 0);
     if (fishPhase == 4) dip = -4;
     fishLine(tipX, tipY, bx, by - 6 + dip, fishPhase == 4 ? 14 : 6);
-    gfx->drawCircle(bx, by + 8, 14 + (int)((now / 90) % 8), C565(150, 200, 240));   // ripples
+    drawFishingRipple(bx, by + 5, 14 + (int)((now / 90) % 8), C565(171, 208, 212));
     if (fishPhase == 2) {
-      gfx->drawCircle(bx, by + 8, 26 + (int)((now / 60) % 6), 0xFFFF);
+      drawFishingRipple(bx, by + 6, 26 + (int)((now / 60) % 6), UI_WHITE);
       for (int i = 0; i < 5; i++) gfx->fillCircle(bx - 20 + i * 10, by - 14 - (int)((now / 40 + i * 7) % 16), 2, 0xFFFF);
-      gfx->setTextSize(4); gfx->setTextColor(0xF800); gfx->setCursor(petX - 6, ground - 118); gfx->print("!");
+      gfx->fillCircle(petX + 2, ground - 105, 18, C565(106, 33, 28));
+      gfx->setTextSize(3);
+      gfx->setTextColor(UI_WHITE);
+      gfx->setCursor(petX - 6, ground - 117);
+      gfx->print("!");
     }
     gfx->fillCircle(bx, by + dip, 7, 0xF800); gfx->fillCircle(bx, by - 3 + dip, 4, 0xFFFF);
   } else {                                                                    // phase 3: it jumps and is caught
@@ -6005,9 +6131,15 @@ static void drawFishScene() {
 // ---- treasure chests ----
 static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   // 100 x 90 box
   uint16_t wood = C565(150, 100, 50), dark = C565(100, 62, 28), gold = 0xFEA0;
-  if (chosen) gfx->fillRoundRect(x - 6, y - 8, 112, 104, 12, CH_LAST);           // highlight behind the one picked
+  gfx->fillRoundRect(x + 2, y + 75, 96, 15, 7, C565(51, 34, 25));
+  if (chosen) {
+    gfx->drawRoundRect(x, y - 8, 100, 100, 10, gold);
+    gfx->drawRoundRect(x - 2, y - 10, 104, 104, 12, gold);
+  }
   gfx->fillRoundRect(x + 4, y + 36, 92, 48, 6, wood);                            // body
-  gfx->fillRect(x + 4, y + 52, 92, 5, dark);
+  gfx->fillRoundRect(x + 9, y + 39, 82, 13, 4, C565(172, 111, 57));
+  gfx->fillRoundRect(x + 9, y + 72, 82, 8, 4, C565(119, 72, 43));
+  gfx->fillRect(x + 4, y + 52, 92, 3, dark);
   gfx->drawRoundRect(x + 4, y + 36, 92, 48, 6, UI_INK);
   // Decorative grain and highlights, within the existing chest footprint.
   for (int k = 0; k < 3; ++k) gfx->drawFastHLine(x + 31, y + 57 + 8*k, 38, dark);
@@ -6016,6 +6148,7 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
   gfx->fillRect(x + 73, y + 40, 2, 40, C565(255, 239, 178));
   if (!open) {
     gfx->fillRoundRect(x + 4, y + 16, 92, 26, 12, wood);                           // lid, shut
+    gfx->fillRoundRect(x + 10, y + 19, 80, 10, 5, C565(187, 123, 66));
     gfx->drawRoundRect(x + 4, y + 16, 92, 26, 12, UI_INK);
     gfx->fillRect(x + 20, y + 18, 8, 22, gold); gfx->fillRect(x + 72, y + 18, 8, 22, gold);
     gfx->fillRoundRect(x + 42, y + 34, 16, 16, 3, gold);                           // lock
@@ -6031,7 +6164,7 @@ static void drawChest(int x, int y, bool open, bool chosen, uint8_t coins) {   /
     gfx->fillRoundRect(x + 4, y - 4, 92, 22, 10, wood);                            // lid, tipped back
     gfx->drawRoundRect(x + 4, y - 4, 92, 22, 10, UI_INK);
     gfx->fillRect(x + 20, y - 2, 8, 18, gold); gfx->fillRect(x + 72, y - 2, 8, 18, gold);
-    for (int i = 0; i < 6 && i < (int)coins + 1; i++) {                            // a heap of coins
+    for (int i = 0; i < 6 && i < coins; i++) {                            // a heap of coins
       gfx->fillCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, gold);
       gfx->drawCircle(x + 26 + i * 10, y + 30 - (i % 2) * 5, 6, 0xC480);
     }
@@ -6135,19 +6268,9 @@ void renderAct() {
     gfx->flush();
     return;
   }
-  // Treasure cavern: original decorative scenery behind the same three
-  // selectable chests. Keep the header, coin labels and back target clear.
-  const uint16_t stone = C565(98, 91, 119);
-  const uint16_t glow = C565(231, 222, 191);
-  gfx->fillRoundRect(48, 116, 370, 243, 24, C565(180, 173, 187));
-  for (int y = 138; y < 335; y += 12)
-    gfx->fillRect(60, y, 346, 12, lerp565(stone, glow, y - 138, 197));
-  for (int i = 0; i < 7; ++i) {
-    const int x = 69 + i * 51;
-    gfx->fillTriangle(x, 120, x + 24, 120, x + 13, 143 + (i * 17) % 21, stone);
-    gfx->fillTriangle(x, 343, x + 20, 343, x + 9, 312 + (i * 7) % 16, C565(147, 140, 162));
-  }
-  gfx->fillRoundRect(62, 225, 342, 88, 16, glow);
+  const uint16_t glow = C565(244, 224, 180);
+  drawIndexedBackdrop(48, 116, CAVERN_W, CAVERN_H, CAVERN_PIXELS, CAVERN_PALETTE);
+  gfx->drawRect(48, 116, CAVERN_W * 2, CAVERN_H * 2, UI_INK);
   gfx->setCursor(CX - 54, 56);
   gfx->print("TREASURE");
   gfx->setTextSize(1);
@@ -6160,6 +6283,7 @@ void renderAct() {
     drawChest(x, y, open, open && i == treasurePick, open ? treasureLoot[i] : 0);
     if (open) {
       snprintf(b, sizeof(b), "%u", treasureLoot[i]);
+      gfx->fillRoundRect(x + 25, y + 102, 50, 35, 9, glow);
       gfx->setTextSize(3);
       gfx->setTextColor(UI_INK);
       gfx->setCursor(x + 50 - (int)strlen(b) * 9, y + 108);
@@ -6167,9 +6291,10 @@ void renderAct() {
     }
   }
   if (treasurePick != 9) {
-    gfx->setTextSize(1);
+    gfx->fillRoundRect(CX - 112, 316, 224, 32, 10, glow);
+    gfx->setTextSize(2);
     gfx->setTextColor(UI_INK);
-    gfx->setCursor(CX - 54, 330);
+    gfx->setCursor(CX - 102, 325);
     gfx->print("tap to play again");
   }
   chessButton(CX - 50, 380, 100, 40, "BACK", UI_TRACK);
@@ -6243,61 +6368,123 @@ static const ShopItem SHOP_ITEMS[] = {
   { "VITAMIN",      "trains a stat",    30, 12 },
 };
 #define SHOP_COUNT ((int)(sizeof(SHOP_ITEMS) / sizeof(SHOP_ITEMS[0])))
-#define SHOP_X 63
-#define SHOP_Y 70
-#define SHOP_W 340
-#define SHOP_H 330
-#define SHOP_ROW_H 46
-#define SHOP_ROW_Y(i) (SHOP_Y + 62 + (i) * (SHOP_ROW_H + 6))
+static const uint16_t BTL_ITEM_COST[BI_COUNT] = { 8, 18, 12 };
+static const uint8_t BTL_ITEM_UNLOCK[BI_COUNT] = { 0, 3, 6 };
+#define SHOP_X 93
+#define SHOP_Y 45
+#define SHOP_W 280
+#define SHOP_H 375
+#define SHOP_TAB_Y 95
+#define SHOP_TAB_H 40
+#define SHOP_TAB_W 126
+#define SHOP_TAB_X(i) (SHOP_X + 12 + (i) * 134)
+#define SHOP_ROW_H 45
+#define SHOP_ROW_Y(i) (SHOP_Y + 100 + (i) * 47)
+#define SHOP_BATTLE_ROW_H 60
+#define SHOP_BATTLE_ROW_Y(i) (SHOP_Y + 100 + (i) * 75)
 
 void renderShop() {
-  // A plain dark backdrop: dimming the previous frame let the menu behind it show through.
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, gNight ? 0x0000 : 0x2104);
   gfx->fillRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_WHITE);
   gfx->drawRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 18, UI_INK);
 
-  char b[32];
+  char b[40];
   gfx->setTextColor(UI_INK);
   gfx->setTextSize(2);
   snprintf(b, sizeof(b), "%s  -  %u", T(S_SHOP), (unsigned)pet.coins);
-  gfx->setCursor(CX - (int)strlen(b) * 6, SHOP_Y + 12);
+  gfx->setCursor(CX - (int)strlen(b) * 6, SHOP_Y + 8);
   gfx->print(b);
   gfx->setTextSize(1);
   gfx->setTextColor(UI_TRACK);
   snprintf(b, sizeof(b), T(S_STEPS_FMT), (unsigned)pet.stepsToday);
-  gfx->setCursor(CX - (int)strlen(b) * 3, SHOP_Y + 36);
+  gfx->setCursor(CX - (int)strlen(b) * 3, SHOP_Y + 31);
   gfx->print(b);
 
-  uint16_t have = pet.registeredCount();
-  for (int i = 0; i < SHOP_COUNT; i++) {
-    const ShopItem &it = SHOP_ITEMS[i];
-    int y = SHOP_ROW_Y(i);
-    bool locked = have < it.need;
-    bool poor = !locked && pet.coins < it.cost;
-    gfx->fillRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, locked ? UI_TRACK : UI_BG_DAY);
-    gfx->drawRoundRect(SHOP_X + 18, y, SHOP_W - 36, SHOP_ROW_H, 12, UI_INK);
-    gfx->setTextColor(locked ? 0x8410 : UI_INK);
+  static const StrId tabs[2] = { S_SHOP_CARE_TAB, S_SHOP_BATTLE_TAB };
+  for (uint8_t i = 0; i < 2; i++) {
+    const int x = SHOP_TAB_X(i);
+    const bool selected = shopTab == i;
+    gfx->fillRoundRect(x, SHOP_TAB_Y, SHOP_TAB_W, SHOP_TAB_H, 10,
+                       selected ? UI_INK : UI_TRACK);
+    gfx->drawRoundRect(x, SHOP_TAB_Y, SHOP_TAB_W, SHOP_TAB_H, 10, UI_INK);
+    gfx->setTextColor(selected ? UI_WHITE : UI_INK);
     gfx->setTextSize(2);
-    gfx->setCursor(SHOP_X + 30, y + 6);
-    gfx->print(it.name);
-    gfx->setTextSize(1);
-    if (locked) snprintf(b, sizeof(b), "collect %u Pokemon", (unsigned)it.need);
-    else snprintf(b, sizeof(b), "%s", it.desc);
-    gfx->setCursor(SHOP_X + 30, y + 30);
-    gfx->print(b);
-    if (!locked) {
+    const char *label = T(tabs[i]);
+    gfx->setCursor(x + (SHOP_TAB_W - (int)strlen(label) * 12) / 2,
+                   SHOP_TAB_Y + 12);
+    gfx->print(label);
+  }
+
+  uint16_t have = pet.registeredCount();
+  if (shopTab == 0) {
+    for (int i = 0; i < SHOP_COUNT; i++) {
+      const ShopItem &it = SHOP_ITEMS[i];
+      const int y = SHOP_ROW_Y(i);
+      const bool locked = have < it.need;
+      const bool poor = !locked && pet.coins < it.cost;
+      gfx->fillRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_ROW_H, 10,
+                         locked ? UI_TRACK : UI_BG_DAY);
+      gfx->drawRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_ROW_H, 10, UI_INK);
+      gfx->setTextColor(locked ? 0x8410 : UI_INK);
       gfx->setTextSize(2);
-      gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
-      snprintf(b, sizeof(b), "%u", (unsigned)it.cost);
-      gfx->setCursor(SHOP_X + SHOP_W - 30 - (int)strlen(b) * 12, y + 14);
+      gfx->setCursor(SHOP_X + 26, y + 5);
+      gfx->print(it.name);
+      gfx->setTextSize(1);
+      if (locked) snprintf(b, sizeof(b), T(S_SHOP_UNLOCK_FMT), (unsigned)it.need);
+      else snprintf(b, sizeof(b), "%s", it.desc);
+      gfx->setCursor(SHOP_X + 26, y + 29);
       gfx->print(b);
+      if (!locked) {
+        gfx->setTextSize(2);
+        gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
+        snprintf(b, sizeof(b), "%u", (unsigned)it.cost);
+        gfx->setCursor(SHOP_X + SHOP_W - 25 - (int)strlen(b) * 12, y + 13);
+        gfx->print(b);
+      }
+    }
+  } else {
+    for (uint8_t i = 0; i < BI_COUNT; i++) {
+      const int y = SHOP_BATTLE_ROW_Y(i);
+      const bool locked = have < BTL_ITEM_UNLOCK[i];
+      const bool full = pet.battleItems[i] >= 99;
+      const bool poor = !locked && pet.coins < BTL_ITEM_COST[i];
+      const bool enabled = !locked && !full;
+      gfx->fillRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_BATTLE_ROW_H, 10,
+                         enabled ? UI_BG_DAY : UI_TRACK);
+      gfx->drawRoundRect(SHOP_X + 16, y, SHOP_W - 32, SHOP_BATTLE_ROW_H, 10, UI_INK);
+      gfx->setTextColor(enabled ? UI_INK : 0x8410);
+      gfx->setTextSize(2);
+      gfx->setCursor(SHOP_X + 26, y + 5);
+      gfx->print(T(BTL_ITEM_NAME[i]));
+      gfx->setTextSize(1);
+      gfx->setCursor(SHOP_X + 26, y + 30);
+      gfx->print(full ? T(S_SHOP_FULL) : T(BTL_ITEM_DESC[i]));
+      char owned[8];
+      snprintf(owned, sizeof(owned), "x%u", (unsigned)pet.battleItems[i]);
+      gfx->setTextColor(UI_INK);
+      gfx->setCursor(SHOP_X + SHOP_W - 24 - (int)strlen(owned) * 6, y + 8);
+      gfx->print(owned);
+      if (!locked && !full) {
+        char cost[8];
+        snprintf(cost, sizeof(cost), "%u", (unsigned)BTL_ITEM_COST[i]);
+        gfx->setTextSize(2);
+        gfx->setTextColor(poor ? UI_BAR_BAD : UI_INK);
+        gfx->setCursor(SHOP_X + SHOP_W - 24 - (int)strlen(cost) * 12, y + 31);
+        gfx->print(cost);
+      }
+      if (locked) {
+        gfx->setTextSize(1);
+        snprintf(b, sizeof(b), T(S_SHOP_UNLOCK_FMT), (unsigned)BTL_ITEM_UNLOCK[i]);
+        gfx->setCursor(SHOP_X + 26, y + 44);
+        gfx->print(b);
+      }
     }
   }
   if (shopMsg[0] && millis() < shopMsgUntil) {
     gfx->setTextSize(1);
     gfx->setTextColor(UI_INK);
-    gfx->setCursor(CX - (int)strlen(shopMsg) * 3, SHOP_Y + SHOP_H - 20);
+    gfx->setCursor(CX - (int)strlen(shopMsg) * 3, SHOP_Y + SHOP_H - 15);
     gfx->print(shopMsg);
   }
   gfx->flush();
@@ -6309,18 +6496,52 @@ static void shopSay(const char *m) {
 }
 
 void shopTap(int16_t x, int16_t y) {
-  bool inPanel = (x >= SHOP_X && x <= SHOP_X + SHOP_W && y >= SHOP_Y && y <= SHOP_Y + SHOP_H);
-  if (!inPanel) { shopOpen = false; return; }       // tap outside = back
-  for (int i = 0; i < SHOP_COUNT; i++) {
-    int ry = SHOP_ROW_Y(i);
-    if (x < SHOP_X + 18 || x > SHOP_X + SHOP_W - 18 || y < ry || y > ry + SHOP_ROW_H) continue;
-    const ShopItem &it = SHOP_ITEMS[i];
-    if (pet.registeredCount() < it.need) { sfxPlay(SFX_DENY); shopSay("collect more Pokemon first"); return; }
-    if (pet.isEgg() || pet.ceremony) { sfxPlay(SFX_DENY); shopSay("needs a creature"); return; }
-    if (pet.coins < it.cost) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
-    if (!pet.giveGift((uint8_t)i)) { sfxPlay(SFX_DENY); shopSay("nothing to do right now"); return; }
-    pet.spendCoins(it.cost);
-    sfxPlay(i == 0 ? SFX_EAT : SFX_HEART);
+  const bool inPanel = x >= SHOP_X && x <= SHOP_X + SHOP_W &&
+                       y >= SHOP_Y && y <= SHOP_Y + SHOP_H;
+  if (!inPanel) { shopOpen = false; return; }
+  if (y >= SHOP_TAB_Y && y <= SHOP_TAB_Y + SHOP_TAB_H) {
+    for (uint8_t i = 0; i < 2; i++) {
+      const int tx = SHOP_TAB_X(i);
+      if (x >= tx && x <= tx + SHOP_TAB_W) {
+        shopTab = i;
+        shopMsg[0] = 0;
+        sfxPlay(SFX_TAP);
+        return;
+      }
+    }
+  }
+  if (shopTab == 0) {
+    for (int i = 0; i < SHOP_COUNT; i++) {
+      const int ry = SHOP_ROW_Y(i);
+      if (x < SHOP_X + 16 || x > SHOP_X + SHOP_W - 16 ||
+          y < ry || y > ry + SHOP_ROW_H) continue;
+      const ShopItem &it = SHOP_ITEMS[i];
+      if (pet.registeredCount() < it.need) { sfxPlay(SFX_DENY); shopSay("collect more Pokemon"); return; }
+      if (pet.isEgg() || pet.ceremony) { sfxPlay(SFX_DENY); shopSay("needs a creature"); return; }
+      if (pet.coins < it.cost) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
+      if (!pet.giveGift((uint8_t)i)) { sfxPlay(SFX_DENY); shopSay("nothing to do right now"); return; }
+      pet.spendCoins(it.cost);
+      sfxPlay(i == 0 ? SFX_EAT : SFX_HEART);
+      shopSay("thank you!");
+      return;
+    }
+    return;
+  }
+  for (uint8_t i = 0; i < BI_COUNT; i++) {
+    const int ry = SHOP_BATTLE_ROW_Y(i);
+    if (x < SHOP_X + 16 || x > SHOP_X + SHOP_W - 16 ||
+        y < ry || y > ry + SHOP_BATTLE_ROW_H) continue;
+    if (pet.registeredCount() < BTL_ITEM_UNLOCK[i]) {
+      char msg[28];
+      snprintf(msg, sizeof(msg), T(S_SHOP_UNLOCK_FMT), (unsigned)BTL_ITEM_UNLOCK[i]);
+      sfxPlay(SFX_DENY);
+      shopSay(msg);
+      return;
+    }
+    if (pet.battleItems[i] >= 99) { sfxPlay(SFX_DENY); shopSay(T(S_SHOP_FULL)); return; }
+    if (pet.coins < BTL_ITEM_COST[i]) { sfxPlay(SFX_DENY); shopSay("not enough coins"); return; }
+    if (!pet.buyBattleItem(i, BTL_ITEM_COST[i])) { sfxPlay(SFX_DENY); return; }
+    sfxPlay(SFX_HEART);
     shopSay("thank you!");
     return;
   }
@@ -6649,7 +6870,8 @@ void renderGallery() {
     const uint16_t accent = reg ? d.accent : UI_TRACK;
     gfx->fillRoundRect(62, 104, 342, 278, 24, UI_WHITE);
     gfx->drawRoundRect(62, 104, 342, 278, 24, lerp565(UI_INK, accent, 3, 4));
-    gfx->fillCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 7, 8));
+    for (int r = 109; r > 0; r -= 4)
+      gfx->fillCircle(CX, 223, r, lerp565(accent, UI_WHITE, 7 + (109-r)*8/109, 16));
     gfx->drawCircle(CX, 223, 109, lerp565(accent, UI_WHITE, 3, 4));
     gfx->fillRoundRect(CX - 72, 301, 144, 15, 7, lerp565(accent, UI_WHITE, 4, 5));
     gfx->fillRoundRect(CX - 52, 303, 104, 7, 3, lerp565(accent, UI_WHITE, 2, 3));
@@ -6681,12 +6903,15 @@ void renderGallery() {
                   300 - (GAL_CELL + t[1] * sc) / 2, sc, !reg);
       }
     }
-    gfx->fillRoundRect(CX - 65, 390, 130, 42, 16, UI_WHITE);
-    gfx->drawRoundRect(CX - 65, 390, 130, 42, 16, UI_INK);
+    gfx->fillRoundRect(CX - 97, 390, 194, 42, 16, UI_WHITE);
+    gfx->drawRoundRect(CX - 97, 390, 194, 42, 16, UI_INK);
+    const char *backLabel = T(S_DETAIL_BACK);
+    const int backLen = (int)strlen(backLabel);
+    const int backSize = backLen <= 15 ? 2 : 1;
     gfx->setTextColor(UI_INK);
-    gfx->setTextSize(2);
-    gfx->setCursor(CX - strlen(T(S_DETAIL_BACK)) * 6, 408);
-    gfx->print(T(S_DETAIL_BACK));
+    gfx->setTextSize(backSize);
+    gfx->setCursor(CX - backLen * 3 * backSize, 411 - 4 * backSize);
+    gfx->print(backLabel);
     gfx->flush();
     return;
   }
@@ -7164,12 +7389,11 @@ uint8_t pmdFrameAt(const PmdAct &a, uint32_t t, bool loop) {
 // dibuja una accion de un PmdMon concreto (m); drawPmdAct usa el global pmd
 void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {
   const PmdAct &a = m.acts[actId];
-  if (!a.frames) return;
-  uint8_t sBase = m.acts[PMD_IDLE].h ? 170 / m.acts[PMD_IDLE].h : 5;
-  if (sBase < 2) sBase = 2;
-  if (sBase > maxS) sBase = maxS;
-  uint8_t s = sBase;
-  while (s > 2 && a.h * s > 250) s--;  // acciones con frame grande (ataque)
+  if (!a.frames || !a.data || !a.w || !a.h || !maxS) return;
+  // Native scale is important for high-res frames. Keep even the largest
+  // valid uint8_t-sized legacy frame drawable at 1x.
+  uint8_t s = spriteFitScale(m.acts[PMD_IDLE].h, a.w, a.h, maxS, 255, 255);
+  if (!s) return;
   uint8_t fi = pmdFrameAt(a, t, loop);
   const uint8_t *fr = a.data + (uint32_t)fi * a.w * a.h;
   // anclar por los pies (a.base), no por el alto del lienzo: asi las acciones
@@ -7189,9 +7413,16 @@ void behNext() {
   beh.t0 = now;
   int r = random(100);
   if (r < 35 && (pmd.has(PMD_WALKL) || pmd.has(PMD_WALKR))) {
-    beh.mode = 1;  // paseo
-    beh.targetX = 150 + random(176);
-    beh.until = now + 15000;
+    const int target = 150 + random(176);
+    const uint8_t walk = target > beh.x ? PMD_WALKR : PMD_WALKL;
+    if (fabsf(target - beh.x) >= 24 && pmd.has(walk)) {
+      beh.mode = 1;
+      beh.targetX = target;
+      beh.lastWalkFrame = now;
+      beh.walkElapsed = 0;
+      beh.until = now + 15000;
+      return;
+    }
   } else if (r < 60) {
     // gesto aleatorio entre los disponibles
     // (Hop fuera: salta demasiado alto; Sit fuera: mira hacia atras)
@@ -7205,14 +7436,22 @@ void behNext() {
       beh.until = now + pmdActTotalMs(pmd.acts[beh.act]);
       return;
     }
-    beh.mode = 0;
-    beh.until = now + 2000 + random(3000);
-  } else {
-    beh.mode = 0;  // mirar al frente
-    beh.until = now + 2000 + random(3000);
   }
+  beh.mode = 0;
+  beh.until = now + 2000 + random(3000);
 }
 
+#ifndef ARDUINO
+void emuWalkPilot(int x, bool right, uint32_t elapsed) {
+  const uint32_t now = millis();
+  beh.x = x;
+  beh.targetX = right ? 325 : 150;
+  beh.mode = 1;
+  beh.until = now + 10000;
+  beh.lastWalkFrame = now;
+  beh.walkElapsed = elapsed;
+}
+#endif
 void drawPetPMD() {
   uint32_t now = millis();
 
@@ -7222,37 +7461,73 @@ void drawPetPMD() {
   }
   if (evoPmd.loaded) evoPmd.unload();  // termino la evolucion: libera la forma anterior
 
-  PetMood m = pet.mood();
-  uint8_t act;
-  bool loop = true;
-  if (m == MOOD_SLEEPING && pmd.has(PMD_SLEEP)) {
-    act = PMD_SLEEP;
+  const PetMood mood = pet.mood();
+  if (mood != beh.mood) {
+    beh.mood = mood;
+    beh.moodSince = now;
     beh.mode = 0;
-  } else if (m == MOOD_EATING && pmd.has(PMD_EAT)) {
-    act = PMD_EAT;
-    beh.t0 = 0;
-  } else if (m == MOOD_SAD && pmd.has(PMD_HURT)) {
-    act = PMD_HURT;
-  } else {
-    // contento: el planificador decide (idle / paseo / gesto)
-    if (now > beh.until) behNext();
-    if (beh.mode == 1) {
-      float d = beh.targetX - beh.x;
-      if (fabsf(d) < 4) {
-        behNext();
-        act = PMD_IDLE;
-      } else {
-        beh.x += (d > 0 ? 3.0f : -3.0f);
-        act = (d > 0) ? PMD_WALKR : PMD_WALKL;
-      }
-    } else {
-      act = (beh.mode == 2) ? beh.act : PMD_IDLE;
-      loop = false;
-    }
-    if (!pmd.has(act)) act = PMD_IDLE;
+    beh.t0 = now;
+    beh.until = now + 2000;
   }
 
-  drawPmdAct(act, (int)beh.x, PET_GROUND, now - beh.t0, loop || act == PMD_IDLE, false, 5);
+  uint8_t act = PMD_IDLE;
+  uint32_t elapsed = now - beh.t0;
+  bool loop = true;
+  if (mood != MOOD_HAPPY) {
+    elapsed = now - beh.moodSince;
+    const uint8_t pose = mood == MOOD_SLEEPING ? PMD_SLEEP :
+                         mood == MOOD_EATING ? PMD_EAT : PMD_HURT;
+    if (pmd.has(pose)) act = pose;
+  } else {
+    if (now > beh.until) behNext();
+    elapsed = now - beh.t0;
+    if (beh.mode == 1) {
+      const float distance = beh.targetX - beh.x;
+      const uint8_t walk = distance > 0 ? PMD_WALKR : PMD_WALKL;
+      const uint32_t sinceFrame = now - beh.lastWalkFrame;
+      // Pause through a hidden screen or a long stall rather than jumping.
+      const uint32_t delta = sinceFrame > 250 ? 0 : sinceFrame;
+      if (pmd.has(walk)) {
+        // One loop covers a fixed stretch of floor at the authored cadence.
+        const float step = 44.0f * delta / pmdActTotalMs(pmd.acts[walk]);
+        if (step < fabsf(distance)) {
+          beh.x += distance > 0 ? step : -step;
+          beh.lastWalkFrame = now;
+          beh.walkElapsed += delta;
+          act = walk;
+          elapsed = beh.walkElapsed;
+        } else {
+          beh.x = beh.targetX;
+        }
+      }
+      if (act == PMD_IDLE) {
+        beh.mode = 0;
+        beh.t0 = now;
+        beh.until = now + 2000;
+        elapsed = 0;
+      }
+    } else if (beh.mode == 2 && pmd.has(beh.act)) {
+      act = beh.act;
+      loop = false;
+    }
+  }
+
+  drawPmdAct(act, (int)beh.x, PET_GROUND, elapsed, loop, false, 5);
+  if (mood == MOOD_EATING && act == PMD_IDLE) {
+    // Some forms never received an Eat clip. Show the berry being eaten
+    // alongside their own idle art, including when the pet is shiny.
+    const int x = (int)beh.x + 48;
+    const int y = PET_GROUND - 29;
+    const uint32_t bite = elapsed % 560;
+    if (bite < 300) {
+      gfx->fillCircle(x - bite / 24, y, 8 - bite / 65, C565(194, 56, 51));
+      gfx->drawLine(x - bite / 24, y - 5, x + 4 - bite / 24, y - 9, C565(74, 128, 48));
+    } else if (bite < 450) {
+      const int drift = (bite - 300) / 33;
+      gfx->fillCircle(x - 12 - drift, y - drift, 2, C565(249, 183, 122));
+      gfx->fillCircle(x - 8 + drift, y + drift, 2, C565(194, 56, 51));
+    }
+  }
 
   if (pet.showHeart()) drawMap(SPR_HEART, 32, (int)beh.x + 50, PET_GROUND - 190, 2, false);
 }

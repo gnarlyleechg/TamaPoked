@@ -3,7 +3,7 @@
 [![Flash in browser](https://img.shields.io/badge/flash-in%20browser-FF6B00?logo=googlechrome&logoColor=white)](https://dylanpdao.github.io/TamaPoke/web/)
 [![MakerWorld](https://img.shields.io/badge/MakerWorld-3D%20case-00AE42?logo=bambulab&logoColor=white)](https://makerworld.com/es/models/2937822-tamapoke-a-pokemon-pokeball-tamagotchi)
 ![Board](https://img.shields.io/badge/board-ESP32--S3%20round%20AMOLED-E7352C?logo=espressif&logoColor=white)
-![Firmware](https://img.shields.io/badge/firmware-v3.23-8A2BE2)
+![Firmware](https://img.shields.io/badge/firmware-v3.24-8A2BE2)
 ![Code](https://img.shields.io/badge/code-MIT-blue)
 ![Languages](https://img.shields.io/badge/languages-6-FFCB05)
 [![Stars](https://img.shields.io/github/stars/DylanPDao/TamaPoke?style=flat&logo=github&color=yellow)](https://github.com/DylanPDao/TamaPoke/stargazers)
@@ -66,17 +66,17 @@ region's answer, so it cannot be flipped to farm a legendary.
 Turn- and move-based, with the real type chart, ailments and STAB. Real Game Boy
 battle music plays throughout.
 
-### Five regions
+### Seven regional ladders
 
 | Pick a ladder | Johto's gyms | LAN battle |
 |---|---|---|
 | <img src="docs/screens/gympick.png" width="240"> | <img src="docs/screens/gymsj.png" width="240"> | <img src="docs/screens/lanready.png" width="240"> |
 
-Kanto, Johto, Hoenn, Sinnoh and Unova each have eight leaders, an Elite 4 and a
-champion, on easy and hard. Four of the five are the games' own teams, checked
-against the pokecrystal, pokeemerald and pokeplatinum disassemblies -- **0
-differences across all 39 trainers**, re-checkable with
-`tools/verify_rosters.py`.
+Kanto, Johto, Hoenn, Sinnoh, Unova, Kalos and Alola each have eight leaders, an
+Elite Four and a champion, on easy and hard. The roster verifier checks 39
+source-backed trainer records against the listed disassemblies and reports **0
+differences**. It marks Unova as NOT VERIFIED; a passing run does not certify
+every regional table. Re-run it with `tools/verify_rosters.py`.
 
 **Unova is the exception and says so.** pret has no Gen 5 disassembly, so that
 ladder is written from knowledge rather than from the game's own tables;
@@ -109,8 +109,10 @@ progression, battery (AXP2101) and PWR button, anti-burn-in dimming,
 **sound (ES8311)**, **6 UI languages (English default)**, **starter choice on
 first run**, and a one-click **web installer**.
 
-Pending: wild encounters / battle (designed, not implemented), 3D case, soak
-test. See **Roadmap**.
+Implemented trainer-gym, LAN and regional wild battles. The battle shop and
+save-backed item bag include Potion, Super Potion and Full Heal. Physical fit,
+device touch and the board soak still need real hardware checks; see **Roadmap**
+and the private release handoff.
 
 ## Game manual (the actual numbers)
 
@@ -224,7 +226,7 @@ brings ELECTIVIRE, MAGMORTAR and RHYPERIOR waiting on exactly the same thing.
   rather than jumping straight into the party, and **TO PARTY** does that.
 - With a full party you're taken straight to the party screen to pick who the
   newcomer replaces — or to let it go. Nothing is ever overwritten silently.
-- *(Gym battles, which is what the party is for: on the roadmap.)*
+- *Trainer, LAN and wild battles are implemented. Battle items are bought in the SHOP and used from ITEM during a fight.*
 
 ### The three endings (you choose & witness each — none auto-fire)
 - 💛 **Farewell** — when it's a **final form** that has lived **3 days**. A button
@@ -338,6 +340,9 @@ price before you accept it.
 | Daily cap | the first 1500 steps of a day earn coins (150 max); steps keep counting after |
 | Gym win | +20 coins (easy), +40 (hard) |
 | Opening the shop | tap the name strip at the top, then SHOP |
+| POTION | 8 coins, unlocks at 0 registered Pokemon; restores up to 20 HP in battle |
+| SUPER POTION | 18 coins, unlocks at 3 registered Pokemon; restores up to 50 HP in battle |
+| FULL HEAL | 12 coins, unlocks at 6 registered Pokemon; clears battle status and confusion |
 | BIG MEAL / BUBBLE BATH | 5 coins, always available (fill food / clean and clear the mess) |
 | TOY | 8 coins, unlocks at 3 Pokemon in the Pokedex (fills joy) |
 | ENERGY DRINK | 8 coins, unlocks at 6 (fills energy) |
@@ -577,7 +582,7 @@ Seven of the original 151 differ from their Gen 1 typing: Magnemite and Magneton
 (Gen 2), and Clefairy, Clefable, Jigglypuff, Wigglytuff and Mr. Mime gained Fairy
 (Gen 6) — the first two losing Normal entirely.
 
-Typing is shown on the Battle page of the stat card. *(Battles: on the roadmap.)*
+Typing is shown on the Battle page of the stat card. Trainer-gym, LAN and regional wild battles are implemented. In battle, Potion restores 20 HP, Super Potion restores 50 HP, and Full Heal clears status and confusion. A successful item use spends the turn; empty or ineffective items do not.
 
 ## Battle stats and training
 
@@ -694,10 +699,9 @@ To test fast: lower `PET_TICK_MS`, `MINUTES_PER_LEVEL` and `FAREWELL_AGE_MIN` in
 
 ## Roadmap
 
-- **Wild encounters / battle** — designed (see project memory): resolution by
-  ATK/DEF/SPD with PMD Attack/Hurt animations, trainer rank as endgame. Style
-  still to pick (auto / timing / turn-based).
-- **Soak test** 24–48 h (instrumentation ready: `HEALTH` command/heartbeat).
+- **Physical fit and board soak** — verify speaker cable exit and bend radius, button reach, shell fit and charging access on the actual board; then run the planned overnight/24-hour soak.
+- **Device verification** — check touch targets, audio, SD backup/restore, item inventory after reboot, brightness and battery behavior on Asher's board.
+- **Realistic Pokémon art** — blocked until a source permits redistribution of rendered game assets. Keep the current canonical sprites until a cleared source is available.
 
 *(Done: 3D-printed case [published on MakerWorld](https://makerworld.com/es/models/2937822-tamapoke-a-pokemon-pokeball-tamagotchi); repo public with the browser installer + one-click sprite bundle.)*
 

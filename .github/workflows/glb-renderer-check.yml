@@ -1,0 +1,94 @@
+name: Offline GLB renderer verification
+on:
+  pull_request:
+    branches: [codex/tamapoke-battle-scene-polish]
+    paths:
+      - 'tools/render_glb_walk.py'
+      - 'tools/bake_pokemon_walk.py'
+      - 'tools/import_local_glb.py'
+      - 'tools/merge_walk_pilot.py'
+      - 'tools/local_palette.py'
+      - 'tools/test_local_palette.py'
+      - 'tools/make_renderer_fixture.py'
+      - '.github/workflows/glb-renderer-check.yml'
+permissions:
+  contents: read
+jobs:
+  render:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/tamapoke-hd-frame-fit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender-4.2.0-linux-x64
+          key: blender-official-4.2.0-linux-x64-v1
+      - name: Independent palette tests
+        run: python -m pip install Pillow && python tools/test_local_palette.py
+      - name: Install Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil libsdl2-dev libgl1 libxi6 libxrender1 libxxf86vm1
+          if [ ! -x "$RUNNER_TEMP/blender-4.2.0-linux-x64/blender" ]; then
+            curl --fail --location --retry 2 --retry-all-errors https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz" || curl --fail --location --retry 2 https://mirrors.ocf.berkeley.edu/blender/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz -o "$RUNNER_TEMP/blender.tar.xz"
+            tar -xf "$RUNNER_TEMP/blender.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/blender-4.2.0-linux-x64" >> "$GITHUB_PATH"
+      - name: Verify bundled Python and Draco
+        run: blender -b --python-exit-code 1 --python-expr 'import numpy; from io_scene_gltf2.io.com import gltf2_io_draco_compression_extension as d; assert d.dll_exists(); print(numpy.__version__)'
+      - name: Generate original skeletal test model
+        run: blender -b -t 2 --python-exit-code 1 --python tools/make_renderer_fixture.py -- "$RUNNER_TEMP/fixture.glb"
+      - name: Render original animation
+        run: blender -b -t 2 --python-exit-code 1 --python tools/render_glb_walk.py -- "$RUNNER_TEMP/fixture.glb" "$RUNNER_TEMP/frames" fixture_walk
+      - name: Validate frames and sprite encoding
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import os,sys
+          from pathlib import Path
+          from PIL import Image
+          sys.path.insert(0,"tools")
+          from bake_pokemon_walk import pack_walk
+          root=Path(os.environ["RUNNER_TEMP"])/"frames"
+          frames=[Image.open(p).convert("RGBA") for p in sorted(root.glob("walk-*.png"))]
+          assert len(frames)==12
+          assert all(f.size==(192,192) and f.getchannel("A").getextrema()==(0,255) for f in frames)
+          assert len({f.tobytes() for f in frames})>1
+          (root/"fixture.tpk2").write_bytes(pack_walk(frames))
+          frames[0].save(root/"fixture.gif",save_all=True,append_images=frames[1:],duration=80,loop=0)
+          print("PASS: original skeletal GLB to 12 transparent frames and TPK2")
+          PY
+      - name: Test local importer with original game sprite
+        run: |
+          /usr/bin/python3 tools/unpack_emulator_assets.py --out tools/sdcard/mons web/sprites-*.pak
+          /usr/bin/python3 tools/import_local_glb.py "$RUNNER_TEMP/fixture.glb" --dex 1 --clip fixture_walk --idle-clip fixture_walk --original tools/sdcard/mons/p001.bin --out "$RUNNER_TEMP/local-import" --rights "Original engineering fixture"
+          test -s "$RUNNER_TEMP/local-import/p001.bin"
+          test -s "$RUNNER_TEMP/local-import/provenance.json"
+          test -s "$RUNNER_TEMP/local-import/walk.gif"
+          /usr/bin/python3 -c 'import sys; sys.path.insert(0,"tools"); from merge_walk_pilot import read; p,a=read(sys.argv[1]); assert all(a[k][2]==12 for k in (0,1,2)); print("PASS: matching idle and both walk clips")' "$RUNNER_TEMP/local-import/p001.bin"
+      - name: Render imported fixture in actual living room
+        run: |
+          ROOT="$PWD"
+          bash tools/emu/tests/run.sh
+          EMU="$ROOT/tools/emu/tamapoke-emu"
+          cp -a tools/sdcard/mons "$RUNNER_TEMP/override-mons"
+          cp "$RUNNER_TEMP/local-import/p001.bin" "$RUNNER_TEMP/override-mons/p001.bin"
+          cd "$RUNNER_TEMP/frames"
+          "$EMU" --sprites "$ROOT/tools/sdcard/mons" --shot homewalkpilot --dex 1 --out baseline
+          rm -f tamapoke.nvs
+          "$EMU" --sprites "$RUNNER_TEMP/override-mons" --shot homewalkpilot --dex 1 --out imported
+          /usr/bin/python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          a=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("imported-*.ppm"))]
+          b=[Image.open(p).convert("RGB") for p in sorted(Path(".").glob("baseline-*.ppm"))]
+          assert len(a)==len(b)==12
+          assert any(x.tobytes()!=y.tobytes() for x,y in zip(a,b))
+          a[0].save("imported-living-room.gif",save_all=True,append_images=a[1:],duration=80,loop=0)
+          print("PASS: local override changes actual living-room frames")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-renderer-fixture
+          path: ${{ runner.temp }}/frames/
+          retention-days: 7

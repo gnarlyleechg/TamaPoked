@@ -7,6 +7,9 @@
 #include "pet.h"
 #include "party.h"
 #include "battle.h"
+#include "trainers.h"
+#include "moves.h"
+#include "sdmon.h"
 #include <chrono>
 #include <string>
 #include <deque>
@@ -140,6 +143,8 @@ void startBattle(int16_t dex, uint8_t lvl);
 extern Combatant btlYou, btlFoe;
 extern uint32_t btlLungeUntil[2], btlHitUntil[2];
 extern uint8_t btlMenu;
+extern bool battleOpen;
+extern PmdMon pmd, btlPmd[2];
 void startTrainerBattle(uint8_t idx, bool hard);
 void onTap(int16_t x, int16_t y);   // the first-boot shots tap their way in
 extern bool gymOpen, playerOpen;
@@ -148,7 +153,8 @@ extern int16_t galleryDetail;
 extern int galleryPage;
 void galleryTap(int16_t, int16_t);
 extern uint8_t galleryRegion;
-extern uint8_t gymRegion;
+extern uint8_t gymRegion, btlRegion;
+extern int8_t btlTrainer;
 extern bool gymPick, galleryPick;
 int wavMain(const char *path, const char *demo);
 extern bool lanOpen;
@@ -170,6 +176,9 @@ extern uint8_t pickTrainer, pickPage;
 void pickDefault(uint8_t cap);
 extern bool pickHard;
 void startSpeedGame();
+void startSack();
+void startGame();
+extern bool sackOpen, gameOpen, spdOpen;
 void setup();
 void loop();
 void render();
@@ -200,7 +209,75 @@ static void writePPM(const char *path) {
   printf("wrote %s\n", path);
 }
 
-static int shotMode(const char *screen, const char *out, int lvl, int iv, int dex) {
+// Run the sketch's normal animation renderer on a fixed clock for repeatable
+// frame-by-frame inspection. Only the initial walk destination is scripted.
+static int starterActionShot(const char *screen, const char *out, int dex, bool shiny) {
+  if (dex < 1 || dex > DEX_COUNT) return 2;
+  const bool audit = !strcmp(out, "-");
+  extern void emuSetCaptureTime(uint32_t);
+  extern void emuWalkPilot(int, bool, uint32_t);
+  extern void battleTap(int16_t, int16_t);
+  pet.dbgHatchAs(dex, shiny);
+  pet.ageMinutes = 7UL * MINUTES_PER_LEVEL;
+  pet.relearnFromLevel();
+  while (pet.hasLearnOffer()) pet.declineLearn();
+  pet.ceremony = 0;
+  pet.sleeping = false;
+  loop();  // sync the sprite for this species
+  if (audit && (!pmd.loaded || pmd.dex != dex)) return 4;
+  pet.dbgSetSeen(13UL * 3600);  // midday is consistent across runs
+  const uint32_t start = millis() + 5000;  // skip starter ceremony banners
+  emuSetCaptureTime(start);
+
+  if (!strcmp(screen, "starterwalk")) {
+    emuWalkPilot(155, true, 0);
+  } else if (!strcmp(screen, "startereat")) {
+    pet.feed();
+    if (audit && pet.mood() != MOOD_EATING) return 5;
+  } else if (!strcmp(screen, "startersleep")) {
+    pet.toggleLight();
+    if (audit && pet.mood() != MOOD_SLEEPING) return 5;
+  } else {
+    startBattle(19, 8);
+    if (audit) {
+      if (!battleOpen || !btlPmd[0].loaded || btlPmd[0].dex != dex) return 5;
+      // Use the same known hit for every sprite, including species that
+      // have no unlocked damaging move at the fixture's level.
+      btlYou.moves[0] = MV_TACKLE;
+    }
+  }
+  for (int i = 0; i < 24; ++i) {
+    emuSetCaptureTime(start + i * 100);
+    if (i == 4 && !strcmp(screen, "starterbattle")) {
+      battleTap(233, 296);
+      int selected = -1;
+      for (int slot = 0; slot < MOVE_SLOTS; ++slot) {
+        const uint8_t move = btlYou.moves[slot];
+        if (!move) continue;
+        if (MOVE_TBL[move].power && MOVE_TBL[move].acc == 100) {
+          selected = slot;
+          break;
+        }
+      }
+      if (selected >= 0)
+        battleTap(149 + (selected % 2) * 168, 296 + (selected / 2) * 52);
+      if (!btlLungeUntil[0]) return 3;
+      if (audit && btlLungeUntil[0]) puts("Player lunge scheduled");
+    }
+    gfx->frameReady = false;
+    render();
+    if (audit) {
+      if (!gfx->frameReady) return 6;
+      continue;
+    }
+    char name[512];
+    snprintf(name, sizeof name, "%s-%02d.ppm", out, i);
+    writePPM(name);
+  }
+  return 0;
+}
+
+static int shotMode(const char *screen, const char *out, int lvl, int iv, int dex, bool shiny) {
   setup();
   for (int i = 0; i < 4; i++) loop();          // let the sketch settle
   bool firstBoot = !strcmp(screen, "starter") || !strcmp(screen, "starterj") ||
@@ -242,13 +319,17 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     galleryDirty = true;
     for (int d = 1; d <= 200; d++) pet.dbgHatchAs(d, false);
   }
-  else if (!strcmp(screen, "gallerydetail")) {
+  else if (!strcmp(screen, "gallerydetail") || !strcmp(screen, "portraitpilot")) {
     // The same canonical Bulbasaur used in the visual pilot, selected through
     // the real gallery handler. This only changes the emulator fixture.
-    pet.dbgHatchAs(1, false);
+    const int id = !strcmp(screen, "portraitpilot") ? dex : 1;
+    if (id != 1 && id != 4 && id != 7 && id != 25) return 2;
+    pet.dbgHatchAs(id, false);
     galleryOpen = true; galleryPick = false; galleryDirty = true;
-    galleryRegion = 0; galleryPage = 0; galleryDetail = 0;
-    galleryTap(113, 124);
+    galleryRegion = 0; galleryPage = (id - 1) / 16; galleryDetail = 0;
+    const int cell = (id - 1) % 16;
+    galleryTap(113 + (cell % 4)*80, 124 + (cell / 4)*80);
+    if (galleryDetail != id) return 3;
   }
   else if (!strcmp(screen, "gallery2")) {   // the second region
     galleryOpen = true;
@@ -261,6 +342,14 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
   else if (!strcmp(screen, "train"))   trainOpen = true;
   else if (!strcmp(screen, "moves"))   { cardOpen = true; cardPage = 2; }
   else if (!strcmp(screen, "movepick")) { movePickOpen = true; }
+  else if (!strcmp(screen, "battleday") || !strcmp(screen, "battlenight")) {
+    if (dex < 1 || dex > DEX_COUNT) return 2;
+    pet.dbgHatchAs(25, false);
+    pet.ceremony = CER_NONE;
+    pet.dbgSetSeen((!strcmp(screen, "battlenight") ? 23UL : 13UL) * 3600);
+    startBattle(dex, 30);
+    if (!battleOpen || btlFoe.dex != dex) return 3;
+  }
   else if (!strcmp(screen, "battle2")) { startBattle(9, 50); }
   else if (!strcmp(screen, "btlmenu")) { startTrainerBattle(3, false); }
   else if (!strcmp(screen, "btlswitch")) { startTrainerBattle(3, false); btlMenu = 2; }
@@ -362,7 +451,31 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     pickDefault(6); pickOpen = true;
   }
   else if (!strcmp(screen, "gymshard")) { gymOpen = true; gymHard = true; pet.badgesHard = 0x03; }
-  else if (!strcmp(screen, "speed")) { startSpeedGame(); }
+  else if (!strcmp(screen, "speed") || !strcmp(screen, "sack") || !strcmp(screen, "ball")) {
+    pet.ceremony = CER_NONE; pet.sleeping = false;
+    if (!strcmp(screen, "speed")) { startSpeedGame(); if (!spdOpen) return 3; }
+    else if (!strcmp(screen, "sack")) { startSack(); if (!sackOpen) return 3; }
+    else { startGame(); if (!gameOpen) return 3; }
+  }
+  else if (!strncmp(screen, "gymday-", 7) || !strncmp(screen, "gymnight-", 9)) {
+    const bool night = !strncmp(screen, "gymnight-", 9);
+    const char *args = screen + (night ? 9 : 7);
+    // Fixed, bounded decimal format; reject malformed and out-of-range captures.
+    const size_t len = strlen(args);
+    if (len < 3 || len > 4 || args[0] < '0' || args[0] > '9' || args[1] != '-') return 2;
+    int region = args[0] - '0', trainer = 0;
+    for (size_t i=2; i<len; ++i) {
+      if (args[i] < '0' || args[i] > '9') return 2;
+      trainer = trainer*10 + args[i]-'0';
+    }
+    if (region >= GYM_REGIONS || trainer >= TRAINER_COUNT) return 2;
+    pet.ceremony = CER_NONE; pet.sleeping = false;
+    pet.dbgSetSeen((night ? 23UL : 13UL) * 3600);
+    gymRegion = uint8_t(region);
+    pickDefault(TRAINER_TEAM_MAX);
+    startTrainerBattle(uint8_t(trainer), false);
+    if (!battleOpen || btlRegion != region || btlTrainer != trainer) return 3;
+  }
   else if (!strcmp(screen, "avatars")) {
     pet.renameTrainer("DYLAN");
     playerOpen = true;
@@ -396,6 +509,23 @@ static int shotMode(const char *screen, const char *out, int lvl, int iv, int de
     }
     if (!strcmp(screen, "partyfull")) partyPick = true;
   }
+  if (!strcmp(screen, "starterwalk") || !strcmp(screen, "startereat") ||
+      !strcmp(screen, "startersleep") || !strcmp(screen, "starterbattle"))
+    return starterActionShot(screen, out, dex, shiny);
+  if (!strcmp(screen, "homewalkpilot")) {
+    extern void emuWalkPilot(int, bool, uint32_t);
+    pet.dbgHatchAs(1, false);
+    while (pet.hasLearnOffer()) pet.declineLearn();
+    pet.ceremony = 0; pet.sleeping = false;
+    loop();
+    for (int i=0;i<12;i++) {
+      emuWalkPilot(280-i*3, false, i*80);
+      render();
+      char name[512]; snprintf(name,sizeof(name),"%s-%02d.ppm",out,i);
+      writePPM(name);
+    }
+    return 0;
+  }
   render();
   writePPM(out);
   return 0;
@@ -408,6 +538,7 @@ int main(int argc, char **argv) {
   const char *shot = nullptr, *shotOut = "shot.ppm";
   const char *wav = nullptr, *demo = nullptr;
   int shotLvl = 0, shotIv = -1, shotDex = 6;
+  bool shotShiny = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--fast") && i + 1 < argc) emuSetTimeScale(atoi(argv[++i]));
@@ -419,12 +550,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--lvl") && i + 1 < argc) shotLvl = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--iv") && i + 1 < argc) shotIv = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--dex") && i + 1 < argc) shotDex = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--shiny")) shotShiny = true;
     else if (!strcmp(argv[i], "--sprites") && i + 1 < argc) emuSetSpriteDir(argv[++i]);
     else if (!strcmp(argv[i], "--wipe")) { remove(save); }
   }
   // Audio preview: no SDL, no board -- just a file you can listen to.
   if (wav) return wavMain(wav, demo);
-  if (shot) return shotMode(shot, shotOut, shotLvl, shotIv, shotDex);   // headless: no SDL at all
+  if (shot) return shotMode(shot, shotOut, shotLvl, shotIv, shotDex, shotShiny);   // headless: no SDL at all
   g_crashFile = std::string(save) + ".crash";
   crashRestore();     // a simulated panic left its breadcrumb here
   nvsLoad(save);

@@ -62,6 +62,15 @@ sips -s format png shot.ppm --out shot.png     # macOS; or use ImageMagick
 `clock`, `menu`, `party`, `partyfull`, `egg`, `starter`. `--lvl`, `--iv` and
 `--dex` set up the pet first.
 
+For repeatable animation sequences, use `--shot starterwalk`, `startereat`,
+`startersleep`, or `starterbattle` with a species ID such as `--dex 25`.
+Use `--out pikachu` to write 24 numbered frames at 100 ms intervals.
+Add `--shiny` to capture the species' shiny variant in these sequences.
+Restore the bundled sprites with `tools/unpack_emulator_assets.py` first.
+Use `--out -` to audit sprite loading, action state and framebuffer flushes for
+these sequences without writing PPM files. For a battle background, use
+`--shot battleday` or `--shot battlenight` with the opponent's `--dex`.
+
 ## How it works
 
 | File | Stands in for |

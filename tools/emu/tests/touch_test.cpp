@@ -44,7 +44,10 @@ extern uint8_t btlFoeAt, btlSquadN, btlSquadAt, btlMenu;
 extern Combatant btlSquad[7];
 extern int8_t btlSwapWho;
 extern bool btlHard;
-extern bool gymOpen, gymHard; extern uint8_t gymPage;
+extern bool gymOpen, gymHard, gymPick; extern uint8_t gymPage, gymRegion, btlRegion;
+extern int8_t btlTrainer;
+extern uint32_t gymWildMsgUntil;
+extern bool shopOpen; extern uint8_t shopTab;
 extern bool pickOpen, pickHard; extern uint8_t pickTrainer; extern uint16_t squadMask;
 uint8_t squadCap(uint8_t idx, bool hard);
 uint8_t pickChosen(); uint8_t pickCandidates(); void pickDefault(uint8_t);
@@ -433,5 +436,80 @@ int main(int argc, char **argv) {
   startTrainerBattle(0, false);
   if (btlYou.level != 14) { printf("FAIL: easy mode did not cap the level\n"); return 1; }
   printf("PASS: easy mode caps the level as well\n");
+
+  // The shop tabs route to a separate battle inventory without disturbing care.
+  battleOpen = false; btlMsgCount = 0; shopOpen = true; shopTab = 0;
+  click(300, 115);                         // BATTLE tab
+  if (!shopOpen || shopTab != 1) { printf("FAIL: shop battle tab did not open\n"); return 1; }
+  pet.coins = 100;
+  pet.battleItems[BI_POTION] = 0;
+  click(200, 175);                         // buy the first battle item
+  if (pet.coins != 92 || pet.battleItems[BI_POTION] != 1 || !shopOpen) {
+    printf("FAIL: shop purchase did not charge 8 coins and add one Potion\n"); return 1;
+  }
+  printf("PASS: shop purchase charges the right price and adds one item\n");
+  click(90, 200);                           // outside the panel closes it
+  if (shopOpen) { printf("FAIL: shop did not close outside its panel\n"); return 1; }
+  pet.begin();                              // reload the actual NVS-backed state
+  if (pet.coins != 92 || pet.battleItems[BI_POTION] != 1) {
+    printf("FAIL: shop item or coin balance did not survive a reload\n"); return 1;
+  }
+  printf("PASS: shop and inventory state survive a save reload\n");
+
+  // The battle bag uses real persistent inventory and spends the opponent's turn.
+  startTrainerBattle(0, false);
+  if (!battleOpen) { printf("FAIL: item test could not start its battle\n"); return 1; }
+  for (int i = 0; i < MOVE_SLOTS; i++) btlFoe.moves[i] = 0;  // isolate item effects
+  btlYou.hp = btlYou.maxHp > 10 ? btlYou.maxHp - 10 : 1;
+  pet.coins = 100;
+  pet.battleItems[BI_POTION] = 0;
+  if (!pet.buyBattleItem(BI_POTION, 8)) { printf("FAIL: could not seed potion inventory\n"); return 1; }
+  click(300, 296);                           // ITEM, upper-right
+  if (btlMenu != 4) { printf("FAIL: ITEM did not open the battle bag\n"); return 1; }
+  click(150, 296);                           // POTION
+  if (btlYou.hp != btlYou.maxHp || pet.battleItems[BI_POTION] != 0 || btlMenu != 0) {
+    printf("FAIL: potion did not heal and consume one turn\n"); return 1;
+  }
+  printf("PASS: potion heals, persists consumption and costs a turn\n");
+
+  // Empty and ineffective items stay in the bag and do not advance the fight.
+  btlMsgCount = 0; click(300, 296); click(150, 296);
+  if (btlMenu != 4 || !btlMsgCount || pet.battleItems[BI_POTION] != 0) {
+    printf("FAIL: an empty slot consumed a turn or left the bag\n"); return 1;
+  }
+  btlMsgCount = 0;
+  if (!pet.buyBattleItem(BI_POTION, 8)) { printf("FAIL: could not seed no-effect potion\n"); return 1; }
+  click(150, 296);
+  if (btlMenu != 4 || !btlMsgCount || pet.battleItems[BI_POTION] != 1) {
+    printf("FAIL: an ineffective item was consumed\n"); return 1;
+  }
+  battleOpen = false; btlMenu = 0; btlMsgCount = 0;
+  printf("PASS: empty and ineffective items do not consume inventory\n");
+
+  // Wild encounters route through the gym region and never award a trainer badge.
+  gymOpen = true; gymPick = false; gymRegion = 0; gymHard = false; gymPage = 0;
+  gymWildMsgUntil = 0;
+  click(160, 394);                           // WILD action button
+  if (!battleOpen || btlTrainer != -1 || btlRegion != 0 || btlFoe.dex < 1 || !btlMsgCount) {
+    printf("FAIL: WILD did not start a regional encounter\n"); return 1;
+  }
+  printf("PASS: WILD starts a Kanto encounter without a trainer\n");
+  click(149, 296);                           // dismiss wild-encounter narration
+  click(317, 348);                           // RUN opens the confirmation
+  if (!battleOpen || btlMenu != 3) {
+    printf("FAIL: RUN did not open its confirmation\n"); return 1;
+  }
+  click(317, 348);                           // NO stays in the battle
+  if (!battleOpen || btlMenu != 0 || !gymOpen || gymRegion != 0) {
+    printf("FAIL: declining RUN did not preserve the battle and Kanto screen\n"); return 1;
+  }
+  printf("PASS: declining RUN returns to the battle without losing its region\n");
+  click(317, 348);                           // open RUN confirmation again
+  click(149, 348);                           // YES leaves the wild battle
+  if (battleOpen || !gymOpen || gymRegion != 0) {
+    printf("FAIL: running from WILD did not return to the same gym region\n"); return 1;
+  }
+  printf("PASS: confirming RUN returns to the same gym region\n");
+  gymOpen = false; btlMsgCount = 0; btlMenu = 0;
   return 0;
 }
