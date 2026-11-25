@@ -3,7 +3,7 @@
 Date: 2026-11-25 (America/Chicago)  
 Repository: `gnarlyleechg/TamaPoked`  
 Branch: `codex/tamapoke-hd-frame-fit`  
-Verified source head: `3a6dfae92e020b9ee08fc2da6c97fd7dc2df9bc4`
+Verified PR head: `af929dcb61abeff511a2e3fd98c8b79657688058`
 
 ## Results
 
@@ -16,6 +16,8 @@ Verified source head: `3a6dfae92e020b9ee08fc2da6c97fd7dc2df9bc4`
 | Purchase and save regression | PASS | Shop purchase and item inventory survive save reload; item use persists consumption and spends a turn |
 
 The firmware compile reported 1,859,979 bytes of flash (59% of the 3,145,728-byte application partition) and 67,036 bytes of static RAM (20% of 327,680 bytes). Existing warnings remain for format specifiers, missing initializers and deprecated SensorLib headers; there were no compile errors.
+
+The firmware compile used commit `3a6dfae92e020b9ee08fc2da6c97fd7dc2df9bc4`. Firmware source did not change after that compile. The later commits update the animation test's setup taps and this verification record; the complete emulator suite ran against those exact test changes before they were committed.
 
 The emulator suite initially exposed two test setup failures. `anim_test` tapped through a stale battle sequence and never dismissed the narration panel. `sprite_test` ran without its local sprite fixtures. The animation test now performs the current three-step tap sequence. The sprite fixtures were extracted from the already checked-in installer bundles; no sprite source was downloaded or changed. Both targeted tests then passed, followed by the full 46-suite run.
 
