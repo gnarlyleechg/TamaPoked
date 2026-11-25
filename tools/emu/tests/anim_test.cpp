@@ -100,7 +100,10 @@ int main(){
   btlYou.base[SI_SPE] = 999;
   btlFoe.base[SI_SPE] = 1;
   btlYou.maxHp = btlYou.hp = btlFoe.maxHp = btlFoe.hp = 1000;
-  battleTap(233, 296);
+  // startBattle opens on its narration panel; dismiss that first, then tap
+  // the current two-column FIGHT cell and the first move cell.
+  battleTap(149, 296);
+  battleTap(149, 296);
   battleTap(149, 296);
   ck(btlYou.hp < 1000 && btlFoe.hp < 1000, "both moves deal damage once");
   ck(btlLungeUntil[0] > 10000 && btlLungeUntil[1] > btlLungeUntil[0],
