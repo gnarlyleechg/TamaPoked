@@ -494,6 +494,22 @@ int main(int argc, char **argv) {
     printf("FAIL: WILD did not start a regional encounter\n"); return 1;
   }
   printf("PASS: WILD starts a Kanto encounter without a trainer\n");
-  battleOpen = false; gymOpen = false; btlMsgCount = 0; btlMenu = 0;
+  click(149, 296);                           // dismiss wild-encounter narration
+  click(317, 348);                           // RUN opens the confirmation
+  if (!battleOpen || btlMenu != 3) {
+    printf("FAIL: RUN did not open its confirmation\n"); return 1;
+  }
+  click(317, 348);                           // NO stays in the battle
+  if (!battleOpen || btlMenu != 0 || !gymOpen || gymRegion != 0) {
+    printf("FAIL: declining RUN did not preserve the battle and Kanto screen\n"); return 1;
+  }
+  printf("PASS: declining RUN returns to the battle without losing its region\n");
+  click(317, 348);                           // open RUN confirmation again
+  click(149, 348);                           // YES leaves the wild battle
+  if (battleOpen || !gymOpen || gymRegion != 0) {
+    printf("FAIL: running from WILD did not return to the same gym region\n"); return 1;
+  }
+  printf("PASS: confirming RUN returns to the same gym region\n");
+  gymOpen = false; btlMsgCount = 0; btlMenu = 0;
   return 0;
 }
