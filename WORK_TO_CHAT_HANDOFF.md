@@ -4,7 +4,8 @@
 
 - Firmware repository: `gnarlyleechg/TamaPoked`
 - Development branch: `codex/tamapoke-hd-frame-fit`
-- Verified firmware source/build commit: `489a3fd9cba2adabb047a208526b3a5961efbbbe`
+- Last firmware source/build commit verified with the pinned board toolchain: `489a3fd9cba2adabb047a208526b3a5961efbbbe`
+- Current branch head: `ed06a771384775604fbfc0700a08fbae397d95ce` (wild encounters and battle items; targeted local checks recorded in `docs/LOCAL_VERIFICATION_2026-11-25.md`; no pinned board build yet)
 - Pull request: [#6](https://github.com/gnarlyleechg/TamaPoked/pull/6), open and draft
 - Engineering repository: `gnarlyleechg/AI-Engineering-Workshop`
 - Board: Waveshare ESP32-S3-Touch-AMOLED-1.75, circular 466 × 466 display
@@ -89,3 +90,9 @@ Art-source research was updated in [REALISTIC_ART_SOURCE_GATE.md](docs/REALISTIC
 The enclosure source review found the manufacturer listing for the Waveshare Type B 8 Ω, 2 W speaker. It lists a 2-pin PH1.25 connector and about 120 mm of cable, but does not document the actual exit direction or minimum bend radius. Confirm the user's delivered speaker matches that model. The full terminal route, retention, and service path remain open.
 
 The R6 digital enclosure baseline remains unchanged. Its partial 9 mm route screen is not a complete speaker route. Keep physical-fit, printing, device, and release gates open as listed below.
+
+## Verification update — current firmware head
+
+At `ed06a771384775604fbfc0700a08fbae397d95ce`, the branch implements the four-action battle menu, save-backed Potion / Super Potion / Full Heal inventory, battle-item shop, and region-pack-backed wild encounters. Targeted battle, save, touch-flow and six-language ASCII/table checks pass locally; exact commands and limits are in `docs/LOCAL_VERIFICATION_2026-11-25.md`.
+
+This is not a replacement for the pinned ESP32-S3 build previously verified at `489a3fd9cba2adabb047a208526b3a5961efbbbe`. The current head has not received that board build or a full SDL emulator run. No GitHub Actions run, merge, installer publication, or device operation was performed. Next software gate: run the complete local emulator suites and one pinned board build when the required SDL2 and Arduino CLI/core/library toolchains are available. Hardware touch, item persistence across real reboot, audio and wild-region return still need owner testing on the board.
