@@ -1,6 +1,6 @@
 # Things to check on the real board (kids build)
 
-Nothing here has run on hardware yet. Tick off as you try each one. Flash with the installer page; your pet is kept.
+This checklist covers the current kids-version candidate. The owner previously reported a short USB-only test on stock v1.21; that does not verify this candidate. Tick off each item only after testing it on the board. The private installer is still a review candidate.
 
 ## Menu and settings
 - [ ] The round BATTLE button (left) opens the gym list; the MENU grid button (right) opens the menu. Both are easy to hit with a finger.
@@ -26,7 +26,10 @@ Nothing here has run on hardware yet. Tick off as you try each one. Flash with t
 - [ ] A finished game pays coins.
 
 ## Battles
+- [ ] Main battle menu has the requested FIGHT, ITEM, POKÉMON, and RUN choices. ITEM is not implemented in the current build.
+- [ ] ITEM opens the bag, an owned item can be used, its effect is correct, and turn order is correct. (After item support is implemented.)
 - [ ] Swiping during a battle does nothing; RUN asks "Run away?".
+- [ ] Every battle control is easy to tap and stays inside the round display.
 - [ ] Battle music plays.
 
 ## Saving
