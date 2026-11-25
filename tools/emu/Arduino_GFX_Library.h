@@ -49,6 +49,13 @@ public:
 
   void fillScreen(uint16_t c) { std::fill(fb.begin(), fb.end(), c); }
 
+  void draw16bitRGBBitmap(int16_t x, int16_t y, const uint16_t *bitmap,
+                          int16_t w, int16_t h) {
+    if (!bitmap || w <= 0 || h <= 0) return;
+    for (int16_t j = 0; j < h; j++)
+      for (int16_t i = 0; i < w; i++) px(x + i, y + j, bitmap[(size_t)j * w + i]);
+  }
+
   void fillRect(int x, int y, int w, int h, uint16_t c) {
     if (w < 0) { x += w; w = -w; }
     if (h < 0) { y += h; h = -h; }

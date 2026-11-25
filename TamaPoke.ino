@@ -113,20 +113,20 @@ bool menuOpen = false;
 // Four rows: PARTY and GYMS came out, since a swipe right and a swipe left now
 // reach them directly. Sized to the bezel -- the panel is 320 wide, so 160 from
 // the centre, and sqrt(233^2 - 160^2) = 169 means it can only span y 64..402.
-#define MENU_Y 68
+#define MENU_Y 55
 #define MENU_W 320
-#define MENU_H 332
+#define MENU_H 365
 #define MENU_ROW_H 34
 #define MENU_ROW_GAP 4
 // 5 rows: STATS / POKEDEX / SETTINGS / RETIRE / CLOSE. At MENU_Y 75 the panel
 // spans 75..391 and the round display gives a half-width of 171 there against
 // the 160 a row needs, so the corners stay on glass.
-#define MENU_ROWS 10
+#define MENU_ROWS 11
 // Kids build: the menu is a 2-column grid of buttons (opened by swiping up from
 // the bottom edge, or by tapping the name band). Button i sits at column i%2, row i/2.
 #define MENU_BTN_W 138
-#define MENU_BTN_H 52
-#define MENU_BTN_GAP 8
+#define MENU_BTN_H 46
+#define MENU_BTN_GAP 4
 #define MENU_BTN_X(i) (CX - MENU_BTN_W - MENU_BTN_GAP / 2 + ((i) % 2) * (MENU_BTN_W + MENU_BTN_GAP))
 #define MENU_BTN_Y(i) (MENU_Y + 14 + ((i) / 2) * (MENU_BTN_H + 6))
 
@@ -168,6 +168,11 @@ void chessTap(int16_t x, int16_t y);
 void chessAiStep(uint32_t now);
 void renderShop();
 void shopTap(int16_t x, int16_t y);
+void renderPaint();
+void paintTap(int16_t x, int16_t y);
+void paintStart(int16_t x, int16_t y);
+void paintMove(int16_t x, int16_t y);
+void paintEnd();
 void openClock();            // defined further down; loop() opens it from the BOOT button
 int clockH = 12, clockM = 0;  // hora en edicion
 
@@ -227,6 +232,17 @@ bool shopOpen = false;        // the coin shop (menu row)
 char shopMsg[28] = "";
 uint32_t shopMsgUntil = 0;
 
+// Simple free-draw activity. Its RGB565 canvas lives in PSRAM and never enters
+// the pet's NVS save, so a drawing or a clear cannot change game progress.
+bool paintOpen = false;
+static const int16_t PAINT_X = 48, PAINT_Y = 112, PAINT_W = 370, PAINT_H = 220;
+static uint16_t *paintPixels = nullptr;
+static uint16_t paintColor = 0xF800;
+static uint8_t paintTool = 0;    // 0 pen, 1 marker, 2 eraser
+static uint8_t paintSize = 1;    // 1, 3, or 6 pixel radius
+static bool paintDragging = false;
+static int16_t paintLastX = 0, paintLastY = 0;
+
 // move picker, opened from the MOVES card page. Most learnsets are level 0, so
 // a level-up "you learned a move" prompt would almost never fire -- the moveset
 // is edited on demand instead.
@@ -253,7 +269,7 @@ enum : uint8_t {
   SCR_STARTER = 0, SCR_REGION, SCR_GALLERY, SCR_DEXPICK, SCR_MOVEPICK, SCR_BOX,
   SCR_PARTY, SCR_KEYBOARD, SCR_CARD, SCR_PLAYER, SCR_CLOCK, SCR_GYM, SCR_GYMPICK,
   SCR_LAN, SCR_PICK, SCR_BATTLE, SCR_WIN, SCR_LEARN, SCR_TRAIN, SCR_MENU,
-  SCR_SHOP, SCR_CHESS, SCR_ACT, SCR_GAME, SCR_MAIN, SCR_COUNT
+  SCR_SHOP, SCR_CHESS, SCR_ACT, SCR_GAME, SCR_PAINT, SCR_MAIN, SCR_COUNT
 };
 extern const char *const SCREEN_NAME[SCR_COUNT];   // const is internal linkage in C++
 
@@ -277,7 +293,7 @@ const char *const SCREEN_NAME[SCR_COUNT] = {
   "starter", "region", "gallery", "dexpick", "movepick", "box",
   "party", "keyboard", "card", "player", "clock", "gym", "gympick",
   "lan", "pick", "battle", "win", "learn", "train", "menu",
-  "shop", "chess", "activities", "minigame", "main"
+  "shop", "chess", "activities", "minigame", "paint", "main"
 };
 
 // Badge art for a region, or nullptr when that region has none yet.
@@ -1244,6 +1260,16 @@ void handleTouch() {
   int16_t x, y;
   bool pressed = touch.getPoint(&x, &y, 1) > 0;
 
+  // Paint consumes continuous touch samples so a drawing gesture cannot turn
+  // into a swipe through the normal game controls.
+  if (paintOpen) {
+    if (pressed && !wasPressed) paintStart(x, y);
+    else if (pressed) paintMove(x, y);
+    else if (wasPressed) paintEnd();
+    wasPressed = pressed;
+    return;
+  }
+
   // saco de entrenamiento: cada toque cuenta al instante (aporrear rapido)
   if (sackOpen) {
     if (pressed && !wasPressed) {
@@ -1320,6 +1346,7 @@ void onSwipeV(int dir) {
   if (trainOpen) { trainOpen = false; return; }
   if (chessOpen) return;               // a chess game is only left with its BACK button
   if (actOpen) return;                 // so are the activities
+  if (paintOpen) return;               // drawing exits only through BACK
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) { movePickOpen = false; return; }
   if (boxOpen) { boxOpen = false; boxSel = 0; return; }   // vertical backs out
@@ -1697,6 +1724,7 @@ void onSwipe(int dir) {
   if (trainOpen) { trainOpen = false; return; }
   if (chessOpen) return;               // a chess game is only left with its BACK button
   if (actOpen) return;                 // so are the activities
+  if (paintOpen) return;               // drawing exits only through BACK
   if (shopOpen) { shopOpen = false; return; }
   if (movePickOpen) {   // the picker is paged; without this its later pages
     uint8_t all[64];    // were simply unreachable
@@ -1759,6 +1787,7 @@ void onSwipe(int dir) {
 }
 
 void onTap(int16_t x, int16_t y) {
+  if (paintOpen) { paintTap(x, y); return; }
   if (pet.awaitingStarter()) {  // primera partida: region y luego inicial
     if (!starterRegionDone) {
       int r = regionPickTap(x, y, RPICK_FOR_START);
@@ -1919,6 +1948,17 @@ void onTap(int16_t x, int16_t y) {
         case 8:
           if (!pet.canRetireNow()) { sfxPlay(SFX_DENY); return; }
           choiceKind = 3; choiceUntil = millis() + 12000;
+          break;
+        case 10:
+          paintOpen = true;
+          paintDragging = false;
+          if (!paintPixels) {
+            paintPixels = (uint16_t *)ps_malloc((size_t)PAINT_W * PAINT_H * sizeof(uint16_t));
+            if (paintPixels) {
+              for (size_t p = 0; p < (size_t)PAINT_W * PAINT_H; p++) paintPixels[p] = 0xFFFF;
+            }
+          }
+          if (!paintPixels) paintOpen = false;
           break;
         default: break;                                           // CLOSE
       }
@@ -2273,6 +2313,7 @@ uint8_t uiCurrentScreen() {
   if (shopOpen) return SCR_SHOP;
   if (chessOpen) return SCR_CHESS;
   if (actOpen) return SCR_ACT;
+  if (paintOpen) return SCR_PAINT;
   if (menuOpen) return SCR_MENU;
   return SCR_MAIN;
 }
@@ -2338,6 +2379,10 @@ void render() {
       else renderBox();
     } else if (partyDetail) renderPartyDetail();
     else renderParty();
+    return;
+  }
+  if (paintOpen) {
+    renderPaint();
     return;
   }
   if (gameOpen) {
@@ -5363,7 +5408,7 @@ void renderCard() {
 // Row labels are built fresh each frame because two of them carry live counts.
 static void menuRowLabel(int i, char *out, size_t n) {
   static const char *const L[MENU_ROWS] = {"STATS", "POKEDEX", "BATTLE", "PARTY", "SHOP",
-                                           "CHESS", "ACTIVITIES", "SETTINGS", "RETIRE", "CLOSE"};
+                                           "CHESS", "ACTIVITIES", "SETTINGS", "RETIRE", "CLOSE", "PAINT"};
   snprintf(out, n, "%s", L[i]);
 }
 
@@ -5378,7 +5423,7 @@ void drawMenu() {
 
   for (int i = 0; i < MENU_ROWS; i++) {
     int bx = MENU_BTN_X(i), by = MENU_BTN_Y(i);
-    bool close = (i == MENU_ROWS - 1);
+    bool close = (i == 9);
     bool dead = (i == 8 && !pet.canRetireNow());   // an egg or a companion
     gfx->fillRoundRect(bx, by, MENU_BTN_W, MENU_BTN_H, 10, close || dead ? UI_TRACK : UI_BG_DAY);
     gfx->drawRoundRect(bx, by, MENU_BTN_W, MENU_BTN_H, 10, UI_INK);
@@ -5389,6 +5434,144 @@ void drawMenu() {
     gfx->setCursor(bx + MENU_BTN_W / 2 - (int)strlen(lbl) * 6, by + MENU_BTN_H / 2 - 8);
     gfx->print(lbl);
   }
+}
+
+// ---------- paint activity ----------
+
+static const uint16_t PAINT_COLORS[10] = {
+  0x0000, 0xFFFF, 0xF800, 0xFD20, 0xFFE0,
+  0x07E0, 0x07FF, 0x001F, 0x801F, 0xF81F
+};
+static const int16_t PAINT_SWATCH_X = 46, PAINT_SWATCH_STEP = 38;
+
+static void paintPixel(int16_t x, int16_t y, uint16_t color) {
+  if (!paintPixels || x < 0 || y < 0 || x >= PAINT_W || y >= PAINT_H) return;
+  paintPixels[(size_t)y * PAINT_W + x] = color;
+}
+
+static void paintStamp(int16_t x, int16_t y) {
+  uint8_t radius = paintTool == 2 ? (uint8_t)(paintSize + 4)
+                  : paintTool == 1 ? (uint8_t)(paintSize + 2)
+                                   : paintSize;
+  uint16_t color = paintTool == 2 ? 0xFFFF : paintColor;
+  for (int16_t yy = -radius; yy <= radius; yy++)
+    for (int16_t xx = -radius; xx <= radius; xx++)
+      if ((int32_t)xx * xx + (int32_t)yy * yy <= (int32_t)radius * radius)
+        paintPixel(x + xx, y + yy, color);
+}
+
+static void paintSegment(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+  int16_t dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  int16_t dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  int16_t err = dx + dy;
+  for (;;) {
+    paintStamp(x0, y0);
+    if (x0 == x1 && y0 == y1) break;
+    int16_t e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+
+void paintStart(int16_t x, int16_t y) {
+  paintDragging = false;
+  if (y >= PAINT_Y && y < PAINT_Y + PAINT_H &&
+      x >= PAINT_X && x < PAINT_X + PAINT_W && paintPixels) {
+    paintLastX = x - PAINT_X;
+    paintLastY = y - PAINT_Y;
+    paintStamp(paintLastX, paintLastY);
+    paintDragging = true;
+  } else {
+    paintTap(x, y);
+  }
+}
+
+void paintMove(int16_t x, int16_t y) {
+  if (!paintDragging || !paintPixels) return;
+  if (x < PAINT_X || x >= PAINT_X + PAINT_W ||
+      y < PAINT_Y || y >= PAINT_Y + PAINT_H) {
+    paintDragging = false;
+    return;
+  }
+  x -= PAINT_X;
+  y -= PAINT_Y;
+  paintSegment(paintLastX, paintLastY, x, y);
+  paintLastX = x;
+  paintLastY = y;
+}
+
+void paintEnd() { paintDragging = false; }
+
+void paintTap(int16_t x, int16_t y) {
+  if (y >= 76 && y <= 103 && x >= PAINT_SWATCH_X && x < PAINT_SWATCH_X + 10 * PAINT_SWATCH_STEP) {
+    uint8_t i = (uint8_t)((x - PAINT_SWATCH_X) / PAINT_SWATCH_STEP);
+    if (i < 10) paintColor = PAINT_COLORS[i];
+    return;
+  }
+  if (y >= 350 && y <= 386) {
+    if (x >= 30 && x < 112) paintTool = 0;
+    else if (x >= 116 && x < 198) paintTool = 1;
+    else if (x >= 202 && x < 284) paintTool = 2;
+    else if (x >= 288 && x < 346) paintSize = paintSize == 1 ? 1 : paintSize == 6 ? 3 : 1;
+    else if (x >= 350 && x <= 410) paintSize = paintSize == 1 ? 3 : paintSize == 3 ? 6 : 6;
+    return;
+  }
+  if (y >= 399 && y <= 431) {
+    if (x >= 98 && x <= 206 && paintPixels) {
+      for (size_t p = 0; p < (size_t)PAINT_W * PAINT_H; p++) paintPixels[p] = 0xFFFF;
+    } else if (x >= 260 && x <= 368) {
+      paintOpen = false;
+      paintDragging = false;
+    }
+  }
+}
+
+void renderPaint() {
+  gfx->fillScreen(RGB565_BLACK);
+  gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
+  gfx->setTextColor(UI_INK);
+  gfx->setTextSize(2);
+  gfx->setCursor(CX - 30, 42);
+  gfx->print("PAINT");
+
+  for (uint8_t i = 0; i < 10; i++) {
+    int x = PAINT_SWATCH_X + i * PAINT_SWATCH_STEP;
+    gfx->fillRoundRect(x, 76, 29, 25, 5, PAINT_COLORS[i]);
+    gfx->drawRoundRect(x, 76, 29, 25, 5, paintColor == PAINT_COLORS[i] ? UI_INK : UI_TRACK);
+    if (paintColor == PAINT_COLORS[i]) gfx->drawRoundRect(x - 2, 74, 33, 29, 6, UI_INK);
+  }
+
+  gfx->fillRoundRect(PAINT_X, PAINT_Y, PAINT_W, PAINT_H, 8, 0xFFFF);
+  gfx->drawRoundRect(PAINT_X, PAINT_Y, PAINT_W, PAINT_H, 8, UI_INK);
+  if (paintPixels) gfx->draw16bitRGBBitmap(PAINT_X, PAINT_Y, paintPixels,
+                                           PAINT_W, PAINT_H);
+  gfx->drawRoundRect(PAINT_X, PAINT_Y, PAINT_W, PAINT_H, 8, UI_INK);
+
+  const char *tools[3] = {"PEN", "MARKER", "ERASER"};
+  const int tx[3] = {30, 116, 202};
+  for (uint8_t i = 0; i < 3; i++) {
+    gfx->fillRoundRect(tx[i], 350, 82, 36, 9, paintTool == i ? UI_BAR_OK : UI_WHITE);
+    gfx->drawRoundRect(tx[i], 350, 82, 36, 9, UI_INK);
+    gfx->setTextColor(UI_INK);
+    gfx->setTextSize(1);
+    gfx->setCursor(tx[i] + (82 - (int)strlen(tools[i]) * 6) / 2, 363);
+    gfx->print(tools[i]);
+  }
+  gfx->fillRoundRect(288, 350, 58, 36, 9, UI_WHITE);
+  gfx->drawRoundRect(288, 350, 58, 36, 9, UI_INK);
+  gfx->setTextColor(UI_INK); gfx->setTextSize(2); gfx->setCursor(309, 359); gfx->print("-");
+  gfx->fillRoundRect(350, 350, 60, 36, 9, UI_WHITE);
+  gfx->drawRoundRect(350, 350, 60, 36, 9, UI_INK);
+  gfx->setCursor(373, 359); gfx->print("+");
+  gfx->setTextSize(1); gfx->setCursor(314, 390); gfx->print("SIZE "); gfx->print(paintSize);
+
+  gfx->fillRoundRect(98, 399, 108, 32, 10, UI_TRACK);
+  gfx->drawRoundRect(98, 399, 108, 32, 10, UI_INK);
+  gfx->setTextColor(UI_INK); gfx->setTextSize(2); gfx->setCursor(113, 408); gfx->print("CLEAR");
+  gfx->fillRoundRect(260, 399, 108, 32, 10, UI_BAR_OK);
+  gfx->drawRoundRect(260, 399, 108, 32, 10, UI_INK);
+  gfx->setCursor(284, 408); gfx->print("BACK");
+  gfx->flush();
 }
 
 // ---------- training submenu (5th icon) ----------
