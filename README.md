@@ -109,8 +109,9 @@ progression, battery (AXP2101) and PWR button, anti-burn-in dimming,
 **sound (ES8311)**, **6 UI languages (English default)**, **starter choice on
 first run**, and a one-click **web installer**.
 
-Pending: wild encounters / battle (designed, not implemented), 3D case, soak
-test. See **Roadmap**.
+Implemented trainer-gym and LAN battles with normal and hard difficulty.
+Pending: wild encounters; the requested in-battle item bag; final 3D case fit and
+board soak testing. See **Roadmap** and the private release handoff.
 
 ## Game manual (the actual numbers)
 
