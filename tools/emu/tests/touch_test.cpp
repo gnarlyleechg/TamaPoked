@@ -441,9 +441,20 @@ int main(int argc, char **argv) {
   battleOpen = false; btlMsgCount = 0; shopOpen = true; shopTab = 0;
   click(300, 115);                         // BATTLE tab
   if (!shopOpen || shopTab != 1) { printf("FAIL: shop battle tab did not open\n"); return 1; }
+  pet.coins = 100;
+  pet.battleItems[BI_POTION] = 0;
+  click(200, 175);                         // buy the first battle item
+  if (pet.coins != 92 || pet.battleItems[BI_POTION] != 1 || !shopOpen) {
+    printf("FAIL: shop purchase did not charge 8 coins and add one Potion\n"); return 1;
+  }
+  printf("PASS: shop purchase charges the right price and adds one item\n");
   click(90, 200);                           // outside the panel closes it
   if (shopOpen) { printf("FAIL: shop did not close outside its panel\n"); return 1; }
-  printf("PASS: care and battle shop tabs respond to touch\n");
+  pet.begin();                              // reload the actual NVS-backed state
+  if (pet.coins != 92 || pet.battleItems[BI_POTION] != 1) {
+    printf("FAIL: shop item or coin balance did not survive a reload\n"); return 1;
+  }
+  printf("PASS: shop and inventory state survive a save reload\n");
 
   // The battle bag uses real persistent inventory and spends the opponent's turn.
   startTrainerBattle(0, false);
