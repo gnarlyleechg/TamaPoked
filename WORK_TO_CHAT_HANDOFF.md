@@ -72,3 +72,20 @@ Resume Asher's existing TamaPoke project from gnarlyleechg/TamaPoked, branch cod
 ## Work-mode exit status
 
 It is safe to leave Work mode now. The review package and test evidence are assembled, the handoff documentation is committed on the existing draft PR, and remaining tasks are clearly separated above.
+
+
+## Audit update — 2026-11-25
+
+The current review screenshots were inspected. The distinct training and gym scenes are present in the emulator captures. The existing Pokémon remain recognizable canonical pixel sprites; they do not yet meet the requested realistic-art direction.
+
+A goal audit found a battle-menu gap that the earlier handoff missed:
+
+- The current battle screen offers FIGHT, POKÉMON, and RUN. It has no ITEM option.
+- The current save/game model has coins and immediate-use shop gifts, but no held battle-item inventory. The item menu is therefore not a label-only change.
+- To meet the requested classic battle controls, add a save-compatible item inventory, item selection and use during battle, and a four-action layout that preserves Pokémon switching and running. Test item effects, turn order, battle exit, save migration, and touch hit areas in the emulator; then make one pinned firmware build. Do not claim Fight/Item/Pokémon/Run is complete until those checks pass.
+
+Art-source research was updated in [REALISTIC_ART_SOURCE_GATE.md](docs/REALISTIC_ART_SOURCE_GATE.md). The search found no candidate permission covering redistribution of rendered Pokémon game assets. Retain current sprites unless that gate changes.
+
+The enclosure source review found the manufacturer listing for the Waveshare Type B 8 Ω, 2 W speaker. It lists a 2-pin PH1.25 connector and about 120 mm of cable, but does not document the actual exit direction or minimum bend radius. Confirm the user's delivered speaker matches that model. The full terminal route, retention, and service path remain open.
+
+The R6 digital enclosure baseline remains unchanged. Its partial 9 mm route screen is not a complete speaker route. Keep physical-fit, printing, device, and release gates open as listed below.
