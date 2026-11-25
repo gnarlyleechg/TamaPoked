@@ -25,3 +25,10 @@ Use existing licensed/authorized local source renders first. No new third-party 
   permissions before evaluating the result in the living room and battle
   emulator. Check actual contact, silhouette, palette and circular clipping
   before extending the same workflow to Charmander, Squirtle and Pikachu.
+
+## November 25 source check
+
+- Rechecked the current [Pokémon support guidance](https://support.pokemon.com/hc/en-us/articles/360000634094-Can-I-use-Pok%C3%A9mon-images-or-materials). It says Pokémon IP should not be used in or associated with a project.
+- Rechecked the [official media usage terms](https://press.pokemon.com/en/Assets-Use-Terms). Their limited license is for editorial or informational use and does not authorize derivative assets.
+- Reviewed the current [third-party model catalog](https://github.com/huanghdm88/pokemon-3d-models). It records licenses per model and states that Pokémon character rights belong to the franchise holders; the repository's code license does not grant those rights.
+- Result: no source found that documents permission to redistribute rendered Pokémon models or sprites in this game. Do not import those candidates into the public repository, installer, or art pack. Keep the existing canonical sprites and shiny variants for the current private review build. The realistic-art upgrade remains blocked on explicit authorization; this research does not decide the separate question of private home use.
