@@ -37,8 +37,8 @@ Nothing here has run on hardware yet. Tick off as you try each one. Flash with t
 - Overnight USB-only test (unplug at night, check the pet is OK in the morning).
 - Battery, charging, 3D printing: need your approval first.
 
-## Previously checked on the PC emulator (no board needed)
-Before Paint was added, emulator coverage included the existing menu buttons, both side buttons, the bottom swipe, fishing, treasure, penalty, the shop and chess; each screen drew and refreshed. Coin payouts and the daily limit were also checked. Paint is new; its emulator and device checks remain unchecked above. The earlier suite runs with `tools/emu/tests/run.sh walk`. The board-only items above (sound, steps, touch feel, SD backup, timing) cannot be checked this way.
+## Already checked on the PC emulator (no board needed)
+Taps through every menu button, both side buttons, the bottom swipe, fishing, treasure, penalty, the shop and chess; each screen draws and refreshes. Coin payouts and the daily limit. Run it with `tools/emu/tests/run.sh walk`. The board-only items above (sound, steps, touch feel, SD backup, timing) cannot be checked this way.
 
 ## Battery-saving changes (v3.22) - check these too
 - [ ] Touch still feels instant while playing (the loop now naps 3 ms between passes).
@@ -48,10 +48,11 @@ Before Paint was added, emulator coverage included the existing menu buttons, bo
 - [ ] If you have a USB power meter, note the current with the screen on, dimmed and off. This is the first real battery number.
 
 ## Paint activity
-- [ ] Open Paint from the bottom entry in the main menu; open the color picker, choose a color and tap DONE. The canvas returns with the chosen color.
+- [ ] Open Paint from Activities; open the color picker, choose a color and tap DONE. The canvas returns with the chosen color.
 - [ ] Draw with the pen, marker and brush. Eraser removes marks. Bottom tools stay clear of the drawing area.
+- [ ] If the screen is dim or off, the first tap wakes it without leaving a mark or activating a control.
 - [ ] Undo removes the last stroke. Clear asks first; NO keeps the picture and YES clears it.
 - [ ] Save a picture, leave Paint and reopen it. The saved drawing returns.
 - [ ] Restart the device and reopen Paint with the SD card installed. The saved drawing returns and the pet's existing save remains intact.
 - [ ] Remove the SD card or boot without one. Painting still works and SAVE reports that it could not save.
-- [ ] Tap the home icon, cancel once, then confirm. It returns to the main game screen.
+- [ ] Tap the home icon, cancel once, then confirm. It returns to Activities; BACK returns to the main screen.
