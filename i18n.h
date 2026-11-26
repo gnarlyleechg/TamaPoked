@@ -134,6 +134,12 @@ enum StrId : uint8_t {
   S_SHOP,           // menu row and shop title
   S_COINS_FMT,      // "%u coins"
   S_STEPS_FMT,      // "%u steps today"
+  S_PAINT,          // standalone drawing activity
+  S_PAINT_COLOR, S_PAINT_PICK, S_PAINT_DONE,
+  S_PAINT_PEN, S_PAINT_MARKER, S_PAINT_BRUSH, S_PAINT_ERASER,
+  S_PAINT_UNDO, S_PAINT_CLEAR, S_PAINT_SAVE,
+  S_PAINT_SAVED, S_PAINT_NO_SD, S_PAINT_ERROR, S_PAINT_FULL,
+  S_PAINT_EXIT_Q, S_PAINT_CLEAR_Q,
   STR_COUNT
 };
 
