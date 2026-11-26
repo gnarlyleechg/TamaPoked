@@ -27,7 +27,8 @@
 #include "avatars.h"
 #include <stdarg.h>
 #if defined(TAMAPOKE_EMULATOR)
-#include <cstdio>
+#include <stdio.h>
+#include <string.h>
 #else
 #include <FS.h>
 #include <SD_MMC.h>
@@ -213,7 +214,7 @@ bool sackNewHi = false;
 // is informational and does not respond to a tap.
 bool trainOpen = false;
 bool actOpen = false;         // activities: fishing and treasure (menu row)
-uint8_t actState = 0;         // 0 menu, 1 fishing, 2 treasure
+uint8_t actState = 0;         // 0 menu, 1 fishing, 2 treasure, 3 penalty, 4 paint
 uint8_t fishPhase = 0;        // 0 idle, 1 waiting for a bite, 2 BITE, 3 caught, 4 too early / got away
 uint32_t fishAt = 0, fishBiteAt = 0;
 uint8_t treasurePick = 9;     // 9 = nothing opened yet
@@ -5681,7 +5682,7 @@ static PaintStroke paintStrokes[PAINT_MAX_STROKES];
 static PaintSegment paintSegments[PAINT_MAX_SEGMENTS];
 static uint16_t paintStrokeCount = 0, paintSegmentCount = 0;
 static uint8_t paintColorIndex = 0, paintSize = 5, paintTool = 0;
-static bool paintLoaded = false, paintDrawing = false, paintDirty = true;
+static bool paintLoaded = false, paintDrawing = false, paintDirty = true, paintHasChanges = false;
 static bool paintColorMenu = false;
 static uint8_t paintDialog = 0;   // 0 none, 1 clear, 2 leave
 static uint8_t paintNotice = 0;   // 1 saved, 2 needs SD, 3 full
@@ -5707,12 +5708,24 @@ static void paintSetNotice(uint8_t note) {
   paintDirty = true;
 }
 
+static void paintDrawClippedLine(int x0, int y0, int x1, int y1, uint16_t color) {
+  if (x0 < PAINT_X) x0 = PAINT_X;
+  if (x0 > PAINT_X + PAINT_W) x0 = PAINT_X + PAINT_W;
+  if (x1 < PAINT_X) x1 = PAINT_X;
+  if (x1 > PAINT_X + PAINT_W) x1 = PAINT_X + PAINT_W;
+  if (y0 < PAINT_Y) y0 = PAINT_Y;
+  if (y0 > PAINT_Y + PAINT_H) y0 = PAINT_Y + PAINT_H;
+  if (y1 < PAINT_Y) y1 = PAINT_Y;
+  if (y1 > PAINT_Y + PAINT_H) y1 = PAINT_Y + PAINT_H;
+  gfx->drawLine(x0, y0, x1, y1, color);
+}
+
 static void paintDrawSegment(const PaintSegment &s) {
   uint16_t c = (s.tool == 3) ? 0xFFFF : s.color;
   int r = s.width / 2;
   for (int o = -r; o <= r; ++o) {
-    gfx->drawLine(s.x0 + o, s.y0, s.x1 + o, s.y1, c);
-    if (o) gfx->drawLine(s.x0, s.y0 + o, s.x1, s.y1 + o, c);
+    paintDrawClippedLine(s.x0 + o, s.y0, s.x1 + o, s.y1, c);
+    if (o) paintDrawClippedLine(s.x0, s.y0 + o, s.x1, s.y1 + o, c);
   }
 }
 
@@ -5734,22 +5747,11 @@ static void paintAppendPoint(int16_t x, int16_t y, bool newStroke) {
                     paintTool};
   paintSegments[paintSegmentCount++] = s;
   ++stroke.count;
+  paintHasChanges = true;
   paintDrawSegment(s);
   paintLastX = x; paintLastY = y;
   paintDirty = false;   // the live framebuffer already has the new stroke
   gfx->flush();
-}
-
-static bool paintWriteData(const uint8_t *data, size_t n, bool load) {
-#if defined(TAMAPOKE_EMULATOR)
-  static FILE *f = nullptr;
-  if (!f) return false;
-  size_t done = load ? fread((void *)data, 1, n, f) : fwrite(data, 1, n, f);
-  return done == n;
-#else
-  (void)data; (void)n; (void)load;
-  return false;
-#endif
 }
 
 static bool paintSave() {
@@ -5780,9 +5782,32 @@ static bool paintSave() {
 #endif
 }
 
+static bool paintValidateData(uint16_t strokeCount, uint16_t segmentCount) {
+  if (strokeCount > PAINT_MAX_STROKES || segmentCount > PAINT_MAX_SEGMENTS) return false;
+  uint32_t expectedFirst = 0;
+  for (uint16_t i = 0; i < strokeCount; ++i) {
+    const PaintStroke &stroke = paintStrokes[i];
+    if (stroke.first != expectedFirst || stroke.count == 0 ||
+        (uint32_t)stroke.count > (uint32_t)segmentCount - expectedFirst) return false;
+    expectedFirst += stroke.count;
+  }
+  if (expectedFirst != segmentCount) return false;
+  for (uint16_t i = 0; i < segmentCount; ++i) {
+    const PaintSegment &seg = paintSegments[i];
+    if (seg.tool > 3 || seg.width == 0 || seg.width > 60 ||
+        seg.x0 < PAINT_X || seg.x0 > PAINT_X + PAINT_W ||
+        seg.x1 < PAINT_X || seg.x1 > PAINT_X + PAINT_W ||
+        seg.y0 < PAINT_Y || seg.y0 > PAINT_Y + PAINT_H ||
+        seg.y1 < PAINT_Y || seg.y1 > PAINT_Y + PAINT_H) return false;
+  }
+  return true;
+}
+
 static void paintLoad() {
   if (paintLoaded) return;
   paintLoaded = true;
+  paintStrokeCount = paintSegmentCount = 0;
+  paintHasChanges = false;
 #if defined(TAMAPOKE_EMULATOR)
   FILE *f = fopen("pawpaint.bin", "rb");
   if (!f) return;
@@ -5792,7 +5817,8 @@ static void paintLoad() {
     uint16_t ng = (uint16_t)(header[7] | (header[8] << 8));
     if (ns <= PAINT_MAX_STROKES && ng <= PAINT_MAX_SEGMENTS &&
         fread(paintStrokes, sizeof(PaintStroke), ns, f) == ns &&
-        fread(paintSegments, sizeof(PaintSegment), ng, f) == ng) {
+        fread(paintSegments, sizeof(PaintSegment), ng, f) == ng &&
+        paintValidateData(ns, ng)) {
       paintStrokeCount = ns; paintSegmentCount = ng;
     }
   }
@@ -5807,7 +5833,8 @@ static void paintLoad() {
     uint16_t ng = (uint16_t)(header[7] | (header[8] << 8));
     if (ns <= PAINT_MAX_STROKES && ng <= PAINT_MAX_SEGMENTS &&
         f.read((uint8_t *)paintStrokes, sizeof(PaintStroke) * ns) == sizeof(PaintStroke) * ns &&
-        f.read((uint8_t *)paintSegments, sizeof(PaintSegment) * ng) == sizeof(PaintSegment) * ng) {
+        f.read((uint8_t *)paintSegments, sizeof(PaintSegment) * ng) == sizeof(PaintSegment) * ng &&
+        paintValidateData(ns, ng)) {
       paintStrokeCount = ns; paintSegmentCount = ng;
     }
   }
@@ -5815,12 +5842,28 @@ static void paintLoad() {
 #endif
 }
 
-static void paintDeleteSaved() {
+static bool paintDeleteSaved() {
 #if defined(TAMAPOKE_EMULATOR)
-  ::remove("pawpaint.bin");
+  return ::remove("pawpaint.bin") == 0;
 #else
-  if (sdReady) SD_MMC.remove("/pawpaint.bin");
+  if (!sdReady) return false;
+  return SD_MMC.remove("/pawpaint.bin");
 #endif
+}
+
+static void paintSaveError() {
+#if defined(TAMAPOKE_EMULATOR)
+  paintSetNotice(4);
+#else
+  paintSetNotice(sdReady ? 4 : 2);
+#endif
+}
+
+static void paintSaveFromUI() {
+  if (paintSave()) {
+    paintHasChanges = false;
+    paintSetNotice(1);
+  } else paintSaveError();
 }
 
 static void paintDrawHouse() {
@@ -5852,19 +5895,25 @@ static void paintDrawTools() {
 
 static void paintDrawPalette() {
   gfx->fillScreen(RGB565_BLACK); gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
-  gfx->fillRoundRect(54, 105, 358, 258, 18, UI_WHITE);
-  gfx->drawRoundRect(54, 105, 358, 258, 18, UI_INK);
+  gfx->fillRoundRect(64, 98, 338, 290, 18, UI_WHITE);
+  gfx->drawRoundRect(64, 98, 338, 290, 18, UI_INK);
   gfx->setTextColor(UI_INK); gfx->setTextSize(2);
-  const char *title = T(S_PAINT);
-  gfx->setCursor(CX - (int)strlen(title) * 6, 119); gfx->print(title);
+  const char *title = T(S_PAINT_PICK);
+  gfx->setCursor(CX - (int)strlen(title) * 6, 110); gfx->print(title);
   for (uint8_t i = 0; i < PAINT_COLOR_COUNT; ++i) {
     int col = i % 5, row = i / 5;
-    int x = 99 + col * 62, y = 165 + row * 39;
+    int x = 109 + col * 62, y = 160 + row * 39;
     gfx->fillCircle(x, y, 16, PAINT_COLORS[i]);
     gfx->drawCircle(x, y, 16, (i == paintColorIndex) ? UI_INK : UI_TRACK);
     if (i == paintColorIndex) gfx->drawCircle(x, y, 19, UI_BAR_OK);
   }
+  gfx->fillRoundRect(176, 350, 114, 38, 14, UI_TRACK);
+  gfx->drawRoundRect(176, 350, 114, 38, 14, UI_INK);
+  gfx->setTextSize(1); gfx->setTextColor(UI_INK);
+  const char *done = T(S_PAINT_DONE);
+  gfx->setCursor(CX - (int)strlen(done) * 3, 366); gfx->print(done);
   gfx->flush();
+  paintDirty = false;
 }
 
 static void paintDrawScreen() {
@@ -5877,7 +5926,7 @@ static void paintDrawScreen() {
   gfx->drawRoundRect(170, 59, 126, 44, 22, UI_TRACK);
   gfx->fillCircle(191, 81, 12, PAINT_COLORS[paintColorIndex]);
   gfx->setTextSize(1); gfx->setTextColor(UI_INK);
-  const char *colorLabel = "COLOR";
+  const char *colorLabel = T(S_PAINT_COLOR);
   gfx->setCursor(211, 78); gfx->print(colorLabel);
   gfx->fillRoundRect(PAINT_X, PAINT_Y, PAINT_W, PAINT_H, 14, 0xFFFF);
   gfx->drawRoundRect(PAINT_X, PAINT_Y, PAINT_W, PAINT_H, 14, UI_TRACK);
@@ -5891,7 +5940,8 @@ static void paintDrawScreen() {
   paintDrawTools();
   if (paintNotice && millis() < paintNoticeUntil) {
     const char *msg = T(paintNotice == 1 ? S_PAINT_SAVED :
-                         paintNotice == 2 ? S_PAINT_NO_SD : S_PAINT_FULL);
+                         paintNotice == 2 ? S_PAINT_NO_SD :
+                         paintNotice == 3 ? S_PAINT_FULL : S_PAINT_ERROR);
     gfx->fillRoundRect(120, 108, 226, 20, 9, UI_WHITE);
     gfx->setTextColor(UI_INK); gfx->setTextSize(1);
     gfx->setCursor(CX - (int)strlen(msg) * 3, 114); gfx->print(msg);
@@ -5900,36 +5950,34 @@ static void paintDrawScreen() {
   paintDirty = false;
 }
 
-static void renderPaintGame() {
-  if (paintDirty) paintDrawScreen();
-}
-
 void paintTouch(int16_t x, int16_t y, bool pressed, bool wasPressed) {
   if (!pressed) { if (wasPressed) paintDrawing = false; return; }
   if (!wasPressed) {
     if (paintDialog) {
       if (x >= 148 && x <= 226 && y >= 276 && y <= 324) {
-        uint8_t dialog = paintDialog; paintDialog = 0; paintDirty = true;
-        if (dialog == 1) {
-          paintStrokeCount = 0; paintSegmentCount = 0; paintDeleteSaved();
-        }
+        // NO: keep the picture and close the question.
+        paintDialog = 0; paintDirty = true;
       } else if (x >= 240 && x <= 318 && y >= 276 && y <= 324) {
         uint8_t dialog = paintDialog; paintDialog = 0; paintDirty = true;
         if (dialog == 1) {
-          paintStrokeCount = 0; paintSegmentCount = 0; paintDeleteSaved();
+          paintStrokeCount = 0; paintSegmentCount = 0;
+          paintHasChanges = !paintDeleteSaved();
         } else {
-          if (paintStrokeCount && !paintSave()) paintSetNotice(2);
+          if (paintHasChanges) {
+            if (paintSave()) paintHasChanges = false;
+            else paintSaveError();
+          }
           actState = 0; actMsg[0] = 0; paintDrawing = false;
         }
       } else { paintDialog = 0; paintDirty = true; }
       return;
     }
     if (paintColorMenu) {
-      if (x >= 77 && x <= 388 && y >= 144 && y <= 346) {
-        int col = (x - 68) / 62, row = (y - 146) / 39;
-        if (col >= 0 && col < 5 && row >= 0 && row < 5) {
-          int idx = row * 5 + col;
-          if (idx < PAINT_COLOR_COUNT) paintColorIndex = (uint8_t)idx;
+      for (uint8_t i = 0; i < PAINT_COLOR_COUNT; ++i) {
+        int cx = 109 + (i % 5) * 62, cy = 160 + (i / 5) * 39;
+        if (abs(x - cx) <= 20 && abs(y - cy) <= 20) {
+          paintColorIndex = i;
+          break;
         }
       }
       paintColorMenu = false; paintDirty = true; return;
@@ -5945,9 +5993,10 @@ void paintTouch(int16_t x, int16_t y, bool pressed, bool wasPressed) {
         if (paintStrokeCount) {
           uint16_t first = paintStrokes[paintStrokeCount - 1].first;
           paintSegmentCount = first; --paintStrokeCount;
+          paintHasChanges = true;
         }
       } else if (i == 5) paintDialog = 1;
-      else paintSetNotice(paintSave() ? 1 : 2);
+      else paintSaveFromUI();
       paintDirty = true; return;
     }
     if (x >= PAINT_X && x <= PAINT_X + PAINT_W && y >= PAINT_Y && y <= PAINT_Y + PAINT_H) {
@@ -5957,11 +6006,14 @@ void paintTouch(int16_t x, int16_t y, bool pressed, bool wasPressed) {
     }
     return;
   }
-  if (paintDrawing && x >= PAINT_X && x <= PAINT_X + PAINT_W &&
-      y >= PAINT_Y && y <= PAINT_Y + PAINT_H &&
-      (abs(x - paintLastX) > 1 || abs(y - paintLastY) > 1)) {
-    if (paintSegmentCount >= PAINT_MAX_SEGMENTS) { paintSetNotice(3); paintDrawing = false; return; }
-    paintAppendPoint(x, y, false);
+  if (paintDrawing) {
+    if (x < PAINT_X || x > PAINT_X + PAINT_W ||
+        y < PAINT_Y || y > PAINT_Y + PAINT_H) {
+      paintDrawing = false;
+    } else if (abs(x - paintLastX) > 1 || abs(y - paintLastY) > 1) {
+      if (paintSegmentCount >= PAINT_MAX_SEGMENTS) { paintSetNotice(3); paintDrawing = false; return; }
+      paintAppendPoint(x, y, false);
+    }
   }
 }
 
@@ -5969,19 +6021,25 @@ static void paintDrawDialog() {
   const char *question = T(paintDialog == 1 ? S_PAINT_CLEAR_Q : S_PAINT_EXIT_Q);
   gfx->fillRect(0, 0, 466, 466, 0x7BEF);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
-  gfx->fillRoundRect(72, 176, 322, 132, 18, UI_WHITE);
-  gfx->drawRoundRect(72, 176, 322, 132, 18, UI_INK);
+  gfx->fillRoundRect(72, 176, 322, 160, 18, UI_WHITE);
+  gfx->drawRoundRect(72, 176, 322, 160, 18, UI_INK);
   gfx->setTextColor(UI_INK); gfx->setTextSize(2);
   gfx->setCursor(CX - (int)strlen(question) * 6, 198); gfx->print(question);
   gfx->fillRoundRect(138, 272, 92, 48, 12, UI_TRACK);
   gfx->fillRoundRect(238, 272, 92, 48, 12, UI_BAR_OK);
   gfx->setTextSize(1);
   const char *no = T(S_NO), *yes = T(S_YES);
-  gfx->setTextColor(UI_INK); gfx->setCursor(174 - (int)strlen(no) * 3, 292); gfx->print(no);
+  gfx->setTextColor(UI_INK); gfx->setCursor(184 - (int)strlen(no) * 3, 292); gfx->print(no);
   gfx->setTextColor(UI_WHITE); gfx->setCursor(284 - (int)strlen(yes) * 3, 292); gfx->print(yes);
 }
 
 static void paintRenderDialog() { paintDrawDialog(); gfx->flush(); paintDirty = false; }
+
+void renderPaintGame() {
+  if (paintDialog) { paintRenderDialog(); return; }
+  if (paintColorMenu) { paintDrawPalette(); return; }
+  if (paintDirty) paintDrawScreen();
+}
 
 static void paintLoadAtEntry() { paintLoad(); paintDirty = true; }
 
@@ -6157,6 +6215,7 @@ static void drawPenaltyScene() {
 }
 
 void renderAct() {
+  if (actState == 4) { renderPaintGame(); return; }
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
   gfx->setTextColor(UI_INK);
@@ -6178,7 +6237,6 @@ void renderAct() {
     gfx->flush();
     return;
   }
-  if (actState == 4) { renderPaintGame(); return; }
   if (actState == 1) {                         // fishing
     drawFishScene();
     gfx->setTextColor(UI_INK);
