@@ -47,12 +47,13 @@ Taps through every menu button, both side buttons, the bottom swipe, fishing, tr
 - [ ] Steps still count with the screen off (walk, wake, check the count).
 - [ ] If you have a USB power meter, note the current with the screen on, dimmed and off. This is the first real battery number.
 
-## Paint activity
-- [ ] Open Paint from Activities; open the color picker, choose a color and tap DONE. The canvas returns with the chosen color.
+## Paint game
+- [ ] Open the Paint button at the bottom of the main menu. It opens directly, without entering Creative Corner.
+- [ ] Tap Color to open the palette. Tap a swatch and the canvas returns with that color. Tap DONE to close the palette without changing the selected color.
 - [ ] Draw with the pen, marker and brush. Eraser removes marks. Bottom tools stay clear of the drawing area.
 - [ ] If the screen is dim or off, the first tap wakes it without leaving a mark or activating a control.
 - [ ] Undo removes the last stroke. Clear asks first; NO keeps the picture and YES clears it.
-- [ ] Save a picture, leave Paint and reopen it. The saved drawing returns.
+- [ ] Save a picture, leave Paint using the house icon, then reopen Paint. The saved drawing returns.
 - [ ] Restart the device and reopen Paint with the SD card installed. The saved drawing returns and the pet's existing save remains intact.
 - [ ] Remove the SD card or boot without one. Painting still works and SAVE reports that it could not save.
-- [ ] Tap the home icon, cancel once, then confirm. It returns to Activities; BACK returns to the main screen.
+- [ ] Tap the house icon, choose NO and confirm Paint stays open. Tap the house again and choose YES; Paint returns to the main game screen.
