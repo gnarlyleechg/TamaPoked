@@ -23,7 +23,7 @@ python3 genproto.py "$ROOT/TamaPoke.ino"
 # .ino is C++ but g++ will not compile that extension
 { echo '#include "proto.h"'; cat "$ROOT/TamaPoke.ino"; } > sketch.cpp
 
-g++ -std=c++17 -O1 -w \
+g++ -std=c++17 -O1 -w -DTAMAPOKE_EMULATOR \
   -I. -I"$ROOT" \
   -DSPRITE_DIR="\"$ROOT/tools/sdcard/mons\"" \
   $(sdl2-config --cflags) \
