@@ -48,10 +48,10 @@ Taps through every menu button, both side buttons, the bottom swipe, fishing, tr
 - [ ] If you have a USB power meter, note the current with the screen on, dimmed and off. This is the first real battery number.
 
 ## Paint activity
-- [ ] Open Paint from Activities; open the color picker, choose a color and tap DONE. The canvas returns with the chosen color.
+- [ ] Open Paint from the bottom entry in the main menu; open the color picker, choose a color and tap DONE. The canvas returns with the chosen color.
 - [ ] Draw with the pen, marker and brush. Eraser removes marks. Bottom tools stay clear of the drawing area.
 - [ ] Undo removes the last stroke. Clear asks first; NO keeps the picture and YES clears it.
 - [ ] Save a picture, leave Paint and reopen it. The saved drawing returns.
 - [ ] Restart the device and reopen Paint with the SD card installed. The saved drawing returns and the pet's existing save remains intact.
 - [ ] Remove the SD card or boot without one. Painting still works and SAVE reports that it could not save.
-- [ ] Tap the home icon, cancel once, then confirm. It returns to Activities; BACK returns to the main screen.
+- [ ] Tap the home icon, cancel once, then confirm. It returns to the main game screen.
