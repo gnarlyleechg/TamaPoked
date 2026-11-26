@@ -1261,8 +1261,15 @@ void handleTouch() {
   // Paint consumes continuous touch samples so a drawing gesture cannot turn
   // into a swipe through the normal game controls.
   if (paintOpen) {
-    paintTouch(x, y, pressed, wasPressed);
-    if (pressed && !wasPressed) lastInteract = millis();
+    static bool wakeOnly = false;
+    if (pressed && !wasPressed) {
+      wakeOnly = (dimStage > 0) || screenOff;
+      if (screenOff) pet.setScreenOff(false);
+      screenOff = false;
+      lastInteract = millis();
+    }
+    if (!wakeOnly) paintTouch(x, y, pressed, wasPressed);
+    if (!pressed) wakeOnly = false;
     wasPressed = pressed;
     return;
   }
@@ -5399,8 +5406,12 @@ void renderCard() {
 
 // Row labels are built fresh each frame because two of them carry live counts.
 static void menuRowLabel(int i, char *out, size_t n) {
-  static const char *const L[MENU_ROWS] = {"STATS", "POKEDEX", "BATTLE", "PARTY", "SHOP",
-                                           "CHESS", "ACTIVITIES", "SETTINGS", "RETIRE", "CLOSE", "PAINT"};
+  if (i == 10) {
+    snprintf(out, n, "%s", T(S_PAINT));
+    return;
+  }
+  static const char *const L[10] = {"STATS", "POKEDEX", "BATTLE", "PARTY", "SHOP",
+                                    "CHESS", "ACTIVITIES", "SETTINGS", "RETIRE", "CLOSE"};
   snprintf(out, n, "%s", L[i]);
 }
 
@@ -5516,30 +5527,45 @@ static void paintAppendPoint(int16_t x, int16_t y, bool newStroke) {
 }
 
 static bool paintSave() {
-#if defined(TAMAPOKE_EMULATOR)
-  FILE *f = fopen("pawpaint.bin", "wb");
-  if (!f) return false;
   const uint8_t header[9] = {'P','A','W','1',1,
     (uint8_t)paintStrokeCount, (uint8_t)(paintStrokeCount >> 8),
     (uint8_t)paintSegmentCount, (uint8_t)(paintSegmentCount >> 8)};
+#if defined(TAMAPOKE_EMULATOR)
+  FILE *f = fopen("pawpaint.tmp", "wb");
+  if (!f) return false;
   bool ok = fwrite(header, 1, sizeof(header), f) == sizeof(header) &&
     fwrite(paintStrokes, sizeof(PaintStroke), paintStrokeCount, f) == paintStrokeCount &&
     fwrite(paintSegments, sizeof(PaintSegment), paintSegmentCount, f) == paintSegmentCount;
-  fclose(f); return ok;
+  if (fclose(f) != 0) ok = false;
+  if (ok) {
+    ::remove("pawpaint.bin");
+    ok = ::rename("pawpaint.tmp", "pawpaint.bin") == 0;
+  }
+  if (!ok) ::remove("pawpaint.tmp");
+  return ok;
 #else
   if (!sdReady) return false;
-  SD_MMC.remove("/pawpaint.bin");
-  File f = SD_MMC.open("/pawpaint.bin", FILE_WRITE);
+  File f = SD_MMC.open("/pawpaint.tmp", FILE_WRITE);
   if (!f) return false;
-  const uint8_t header[9] = {'P','A','W','1',1,
-    (uint8_t)paintStrokeCount, (uint8_t)(paintStrokeCount >> 8),
-    (uint8_t)paintSegmentCount, (uint8_t)(paintSegmentCount >> 8)};
   bool ok = f.write(header, sizeof(header)) == sizeof(header) &&
     f.write((const uint8_t *)paintStrokes, sizeof(PaintStroke) * paintStrokeCount) ==
       sizeof(PaintStroke) * paintStrokeCount &&
     f.write((const uint8_t *)paintSegments, sizeof(PaintSegment) * paintSegmentCount) ==
       sizeof(PaintSegment) * paintSegmentCount;
-  f.close(); return ok;
+  f.close();
+  if (!ok) {
+    SD_MMC.remove("/pawpaint.tmp");
+    return false;
+  }
+  if (SD_MMC.exists("/pawpaint.bin") && !SD_MMC.remove("/pawpaint.bin")) {
+    SD_MMC.remove("/pawpaint.tmp");
+    return false;
+  }
+  if (!SD_MMC.rename("/pawpaint.tmp", "/pawpaint.bin")) {
+    SD_MMC.remove("/pawpaint.tmp");
+    return false;
+  }
+  return true;
 #endif
 }
 
