@@ -36,6 +36,7 @@
 #include "rtcbat.h"
 #include "i18n.h"
 #include "audio.h"
+#include "touchcal.h"
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
@@ -158,6 +159,10 @@ char partyBannerName[14] = "";
 #define PARTY_GRID_Y 88
 
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
+static TouchCalibration touchCalibration;
+static CalTouchPoint touchSamples[5];
+static bool touchCalOpen = false, touchCalRetry = false;
+static uint8_t touchCalStep = 0;
 void drawSideButtons();
 bool sideButtonTap(int16_t x, int16_t y);
 void renderAct();
@@ -219,6 +224,7 @@ Chess chessG;
 uint8_t chessState = 0;       // 0 pick a level, 1 playing, 2 game over
 uint8_t chessLevel = 1;       // 1 easy, 2 medium, 3 hard
 int8_t chessSel = -1;
+int8_t chessPendingTo = -1;
 bool chessAiDue = false;
 uint32_t chessAiAt = 0, chessQuitUntil = 0;
 uint8_t chessEarned = 0;
@@ -702,6 +708,9 @@ void setup() {
     if (bp.begin("tkids", true)) {
       uint8_t b = bp.getUChar("bright", 4);
       gBrightLvl = (b >= 1 && b <= 5) ? b : 4;
+      TouchCalibration saved;
+      if (bp.getBytes("touchcal", &saved, sizeof(saved)) == sizeof(saved) && saved.valid())
+        touchCalibration = saved;
       bp.end();
     }
   }
@@ -863,6 +872,9 @@ void loop() {
       if (screenOff || dimStage > 0) {
         lastInteract = now;               // a dark panel: the press just wakes it
         if (screenOff) { screenOff = false; pet.setScreenOff(false); }
+      } else if (touchCalOpen) {
+        touchCalOpen = false;
+        swallowGesture = true;
       } else if (clockOpen) {
         clockOpen = false;
       } else if (uiCurrentScreen() == SCR_MAIN) {
@@ -893,7 +905,9 @@ void loop() {
   actStep(now);
   audioHold(gameOpen || sackOpen || spdOpen);   // amplifier stays awake during a minigame
 
-  updateBrightness(now);
+  // Touch handling can set lastInteract after the loop's initial timestamp.
+  // Use a fresh timestamp so idle time cannot underflow and dim the display.
+  updateBrightness(millis());
 
   // vuelca el autoguardado periodico SOLO con la pantalla atenuada/apagada o
   // durmiendo: la escritura a NVS congela ~1s ambos cores (caché de flash off),
@@ -1243,6 +1257,11 @@ void handleTouch() {
   gTouchIrq = false;
   int16_t x, y;
   bool pressed = touch.getPoint(&x, &y, 1) > 0;
+  if (pressed && !touchCalOpen) {
+    const CalTouchPoint corrected = touchCalibration.correct({x, y});
+    x = corrected.x;
+    y = corrected.y;
+  }
 
   // saco de entrenamiento: cada toque cuenta al instante (aporrear rapido)
   if (sackOpen) {
@@ -1759,6 +1778,32 @@ void onSwipe(int dir) {
 }
 
 void onTap(int16_t x, int16_t y) {
+  if (touchCalOpen) {
+    const CalTouchPoint target = TOUCH_TARGETS[touchCalStep];
+    int dx = x - target.x, dy = y - target.y;
+    if (dx * dx + dy * dy > 80 * 80) return;
+    touchSamples[touchCalStep++] = {x, y};
+    if (touchCalStep == 5) {
+      TouchCalibration calibrated;
+      if (calibrated.fit(touchSamples)) {
+        Preferences prefs;
+        if (prefs.begin("tkids", false)) {
+          const bool saved = prefs.putBytes("touchcal", &calibrated, sizeof(calibrated)) == sizeof(calibrated);
+          prefs.end();
+          if (saved) {
+            touchCalibration = calibrated;
+            touchCalOpen = false;
+            sfxPlay(SFX_TAP);
+            return;
+          }
+        }
+      }
+      touchCalStep = 0;
+      touchCalRetry = true;
+    }
+    sfxPlay(SFX_TAP);
+    return;
+  }
   if (pet.awaitingStarter()) {  // primera partida: region y luego inicial
     if (!starterRegionDone) {
       int r = regionPickTap(x, y, RPICK_FOR_START);
@@ -2956,6 +3001,24 @@ void drawClockBtn(int x, int y, const char *l) {
 static const char *const LANG_CODES[LANG_COUNT] = { "ES", "EN", "FR", "DE", "IT", "PT" };
 
 void renderClock() {
+  if (touchCalOpen) {
+    gfx->fillScreen(RGB565_BLACK);
+    gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
+    const CalTouchPoint target = TOUCH_TARGETS[touchCalStep];
+    gfx->setTextColor(UI_INK);
+    gfx->setTextSize(2);
+    gfx->setCursor(119, 132);
+    gfx->print(touchCalRetry ? "TRY THE DOTS AGAIN" : "TAP THE DOT CENTER");
+    gfx->setCursor(215, 158);
+    gfx->printf("%u/5", (unsigned)touchCalStep + 1);
+    gfx->setCursor(149, 300);
+    gfx->print("BOOT TO CANCEL");
+    gfx->fillCircle(target.x, target.y, 19, UI_INK);
+    gfx->fillCircle(target.x, target.y, 15, UI_BAR_OK);
+    gfx->fillCircle(target.x, target.y, 4, UI_INK);
+    gfx->flush();
+    return;
+  }
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
   gfx->setTextColor(UI_INK);
@@ -3044,10 +3107,16 @@ void renderClock() {
     }
   }
 
-  gfx->fillRoundRect(133, 340, 200, 48, 14, UI_BAR_OK);
+  gfx->fillRoundRect(92, 340, 176, 48, 14, UI_WHITE);
+  gfx->drawRoundRect(92, 340, 176, 48, 14, UI_INK);
+  gfx->setTextSize(2);
+  gfx->setTextColor(UI_INK);
+  gfx->setCursor(120, 356);
+  gfx->print("CALIBRATE");
+  gfx->fillRoundRect(278, 340, 96, 48, 14, UI_BAR_OK);
   gfx->setTextColor(UI_BG_DAY);
   gfx->setTextSize(3);
-  gfx->setCursor(CX - 18, 352);
+  gfx->setCursor(308, 352);
   gfx->print("OK");
 
   gfx->setTextColor(UI_TRACK);
@@ -3096,7 +3165,15 @@ void clockTap(int16_t x, int16_t y) {
       return;
     }
   }
-  if (y >= 340 && y <= 388 && x >= 133 && x <= 333) { applyClock(); return; }
+  if (y >= 340 && y <= 388) {
+    if (x >= 92 && x <= 268) {
+      touchCalStep = 0;
+      touchCalRetry = false;
+      touchCalOpen = true;
+    } else if (x >= 278 && x <= 374) {
+      applyClock();
+    }
+  }
 }
 
 // llama + numero de racha arriba a la izquierda
@@ -5518,6 +5595,13 @@ static void chessPiece(int cx, int cy, int t, bool white) {
   chessGlyph(cx, cy, t, fill, line, true);
 }
 
+// The confirmation controls fit below the board on the round display.
+static constexpr int CH_CONFIRM_Y = CH_Y0 + 8 * CH_SQ + 4;
+static constexpr int CH_CONFIRM_H = 34;
+static constexpr int CH_CONFIRM_W = 106;
+static constexpr int CH_CANCEL_X = CX - 113;
+static constexpr int CH_MOVE_X = CX + 7;
+
 void renderChess() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -5536,9 +5620,13 @@ void renderChess() {
     gfx->flush();
     return;
   }
-  // the board
+  // Show the resulting position without changing the live game.
+  const bool previewing = chessPendingTo >= 0;
+  Chess preview = chessG;
+  if (previewing) preview.play(chessSel, chessPendingTo, CH_Q);
+  const Chess &shown = previewing ? preview : chessG;
   ChessMove mv[64];
-  int nmv = (chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
+  int nmv = (!previewing && chessSel >= 0) ? chessG.movesFrom(chessSel, mv) : 0;
   bool checked = chessG.inCheck(chessG.whiteToMove);
   for (int r = 0; r < 8; r++) {
     for (int f = 0; f < 8; f++) {
@@ -5546,9 +5634,14 @@ void renderChess() {
       uint16_t col = ((r + f) & 1) ? CH_LIGHT : CH_DARK;
       if (chessG.hasLast && (s == chessG.last.from || s == chessG.last.to)) col = CH_LAST;
       if (s == chessSel) col = CH_PICK;
+      if (s == chessPendingTo) col = UI_BAR_OK;
       gfx->fillRect(x, y, CH_SQ, CH_SQ, col);
-      int8_t p = chessG.b[s];
-      if (checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
+      int8_t p = shown.b[s];
+      if (s == chessPendingTo) {
+        gfx->drawRect(x, y, CH_SQ, CH_SQ, UI_INK);
+        gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_WHITE);
+      }
+      if (!previewing && checked && p == (chessG.whiteToMove ? CH_K : -CH_K)) gfx->drawRect(x + 1, y + 1, CH_SQ - 2, CH_SQ - 2, UI_BAR_BAD);
       if (p) {
         chessPiece(x + 20, y + 20, p > 0 ? p : -p, p > 0);
       }
@@ -5571,10 +5664,15 @@ void renderChess() {
   } else if (chessRes == CHR_WHITE_WINS) snprintf(b, sizeof(b), "YOU WIN! +%u coins", chessEarned);
   else if (chessRes == CHR_BLACK_WINS) snprintf(b, sizeof(b), "I won! +%u coins", chessEarned);
   else snprintf(b, sizeof(b), "a draw! +%u coins", chessEarned);
-  gfx->setCursor(CX - (int)strlen(b) * 6, 402);
-  gfx->print(b);
-  bool sure = chessState == 1 && millis() < chessQuitUntil;
-  chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
+  if (previewing) {
+    chessButton(CH_CANCEL_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "CANCEL", UI_TRACK);
+    chessButton(CH_MOVE_X, CH_CONFIRM_Y, CH_CONFIRM_W, CH_CONFIRM_H, "MOVE", UI_BAR_OK);
+  } else {
+    gfx->setCursor(CX - (int)strlen(b) * 6, 402);
+    gfx->print(b);
+    bool sure = chessState == 1 && millis() < chessQuitUntil;
+    chessButton(CH_BACK_X, CH_BACK_Y, CH_BACK_W, CH_BACK_H, sure ? "SURE?" : "BACK", sure ? UI_BAR_BAD : UI_TRACK);
+  }
   gfx->flush();
 }
 
@@ -5600,6 +5698,25 @@ void chessAiStep(uint32_t now) {
 }
 
 void chessTap(int16_t x, int16_t y) {
+  if (chessPendingTo >= 0) {
+    if (y < CH_CONFIRM_Y || y >= CH_CONFIRM_Y + CH_CONFIRM_H) return;
+    if (x >= CH_CANCEL_X && x < CH_CANCEL_X + CH_CONFIRM_W) {
+      chessPendingTo = -1;  // Keep the piece selected for another try.
+      sfxPlay(SFX_TAP);
+    } else if (x >= CH_MOVE_X && x < CH_MOVE_X + CH_CONFIRM_W) {
+      const int to = chessPendingTo;
+      chessPendingTo = -1;
+      if (!chessG.play(chessSel, to, CH_Q)) {
+        sfxPlay(SFX_DENY);
+        return;
+      }
+      chessSel = -1;
+      sfxPlay(SFX_TAP);
+      chessFinish();
+      if (chessState == 1) { chessAiDue = true; chessAiAt = millis() + 250; }
+    }
+    return;
+  }
   bool onBack = (x >= CH_BACK_X - 10 && x <= CH_BACK_X + CH_BACK_W + 10 && y >= (chessState == 0 ? 340 : CH_BACK_Y) - 6 &&
                  y <= (chessState == 0 ? 384 : CH_BACK_Y + CH_BACK_H + 8));
   if (chessState == 0) {
@@ -5609,7 +5726,7 @@ void chessTap(int16_t x, int16_t y) {
       if (x >= CX - 90 && x <= CX + 90 && y >= by && y <= by + 52) {
         chessLevel = (uint8_t)(i + 1);
         chessG.reset();
-        chessState = 1; chessSel = -1; chessAiDue = false; chessQuitUntil = 0;
+        chessState = 1; chessSel = -1; chessPendingTo = -1; chessAiDue = false; chessQuitUntil = 0;
         sfxPlay(SFX_TAP);
         return;
       }
@@ -5637,12 +5754,16 @@ void chessTap(int16_t x, int16_t y) {
     sfxPlay(SFX_TAP);
     return;
   }
-  if (chessSel >= 0 && chessG.play(chessSel, s, CH_Q)) {
-    chessSel = -1;
-    sfxPlay(SFX_TAP);
-    chessFinish();
-    if (chessState == 1) { chessAiDue = true; chessAiAt = millis() + 250; }
-    return;
+  if (chessSel >= 0) {
+    ChessMove moves[64];
+    const int count = chessG.movesFrom(chessSel, moves);
+    for (int i = 0; i < count; ++i) {
+      if (moves[i].to == s) {
+        chessPendingTo = s;
+        sfxPlay(SFX_TAP);
+        return;
+      }
+    }
   }
   if (chessSel >= 0) sfxPlay(SFX_DENY);     // not a legal square for that piece
   chessSel = -1;

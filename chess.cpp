@@ -263,8 +263,9 @@ ChessMove Chess::aiMove(int level, uint32_t seed) const {
   int n = legalMoves(m);
   ChessMove none;
   if (!n) return none;
-  int depth = level <= 1 ? 2 : (level == 2 ? 3 : 4);
-  int noise = level <= 1 ? 150 : (level == 2 ? 25 : 0);
+  // Easy rates its move without looking ahead to the player's reply.
+  int depth = level <= 1 ? 1 : (level == 2 ? 3 : 4);
+  int noise = level <= 1 ? 200 : (level == 2 ? 25 : 0);
   uint32_t x = seed ? seed : 0x9E3779B9u;
   int bestScore = -32001, bestIdx = 0;
   for (int i = 0; i < n; i++) {
